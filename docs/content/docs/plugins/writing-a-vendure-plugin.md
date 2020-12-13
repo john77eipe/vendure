@@ -7,9 +7,11 @@ weight: 2
 
 This is a complete example of how to implement a simple plugin step-by-step.
 
-{{% alert "primary" %}}
+{{< alert "primary" >}}
   For a complete working example of a Vendure plugin, see the [real-world-vendure Reviews plugin](https://github.com/vendure-ecommerce/real-world-vendure/tree/master/src/plugins/reviews)
-{{% /alert %}}
+  
+  If you intend to write a shared plugin to be distributed as an npm package, see the [vendure plugin-template repo](https://github.com/vendure-ecommerce/plugin-template)
+{{< /alert >}}
 
 ## Example: RandomCatPlugin
 
@@ -61,12 +63,12 @@ export class CatFetcher {
 
 {{% alert %}}
 The `@Injectable()` decorator is part of the underlying [Nest framework](https://nestjs.com/), and allows us to make use of Nest's powerful dependency injection features. In this case, we'll be able to inject the `CatFetcher` service into the resolver which we will soon create.
-{{% /alert %}}
+{{< /alert >}}
 
 
-{{% alert "warning" %}}
+{{< alert "warning" >}}
 To use decorators with TypeScript, you must set the "emitDecoratorMetadata" and "experimentalDecorators" compiler options to `true` in your tsconfig.json file.
-{{% /alert %}}
+{{< /alert >}}
 
 ### Step 3: Define the new mutation
 
@@ -90,7 +92,7 @@ Now that we've defined the new mutation, we'll need a resolver function to handl
 
 ```TypeScript
 import { Args, Mutation, Resolver } from '@nestjs/graphql';
-import { Ctx, Allow, ProductService, RequestContext } from '@vendure/core';
+import { Ctx, Allow, ProductService, RequestContext, Transaction } from '@vendure/core';
 import { Permission } from '@vendure/common/lib/generated-types';
 
 @Resolver()
@@ -98,6 +100,7 @@ export class RandomCatResolver {
 
   constructor(private productService: ProductService, private catFetcher: CatFetcher) {}
 
+  @Transaction()
   @Mutation()
   @Allow(Permission.UpdateCatalog)
   async addRandomCat(@Ctx() ctx: RequestContext, @Args() args) {
@@ -114,8 +117,9 @@ Some explanations of this code are in order:
 
 * The `@Resolver()` decorator tells Nest that this class contains GraphQL resolvers.
 * We are able to use Nest's dependency injection to inject an instance of our `CatFetcher` class into the constructor of the resolver. We are also injecting an instance of the built-in `ProductService` class, which is responsible for operations on Products.
+* We use the `@Transaction()` decorator to ensure that all database operations in this resolver are run within a transaction. This ensure that if any part of it fails, all changes will be rolled back, keeping our data in a consistent state. For more on this, see the [Transaction Decorator docs]({{< relref "transaction-decorator" >}}).
 * We use the `@Mutation()` decorator to mark this method as a resolver for a mutation with the corresponding name.
-* The `@Allow()` decorator enables us to define permissions restrictions on the mutation. Only those users whose permissions include `UpdateCatalog` may perform this operation. For a full list of available permissions, see the [Permission enum]({{< relref "/docs/graphql-api/admin/enums" >}}#permission).
+* The `@Allow()` decorator enables us to define permissions restrictions on the mutation. Only those users whose permissions include `UpdateCatalog` may perform this operation. For a full list of available permissions, see the [Permission enum]({{< relref "/docs/graphql-api/admin/enums" >}}#permission). Plugins may also define custom permissions, see [Defining customer permissions]({{< relref "defining-custom-permissions" >}}).
 * The `@Ctx()` decorator injects the current `RequestContext` into the resolver. This provides information about the current request such as the current Session, User and Channel. It is required by most of the internal service methods.
 * The `@Args()` decorator injects the arguments passed to the mutation as an object.
 
@@ -221,7 +225,7 @@ import { Injectable } from '@nestjs/common';
 import { Args, Mutation, Resolver } from '@nestjs/graphql';
 import gql from 'graphql-tag';
 import http from 'http';
-import { Allow, Ctx, ProductService, RequestContext, VendureConfig, VendurePlugin } from '@vendure/core';
+import { Allow, Ctx, PluginCommonModule, ProductService, RequestContext, VendureConfig, VendurePlugin } from '@vendure/core';
 import { Permission } from '@vendure/common/lib/generated-types';
 
 const schemaExtension = gql`

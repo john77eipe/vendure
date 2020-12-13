@@ -14,16 +14,18 @@ import {
 import { SortOrder } from '@vendure/common/lib/generated-shop-types';
 import { PaginationInstance } from 'ngx-pagination';
 import { combineLatest, EMPTY, Observable } from 'rxjs';
-import { debounceTime, map, switchMap, takeUntil } from 'rxjs/operators';
+import { debounceTime, finalize, map, switchMap, takeUntil } from 'rxjs/operators';
 
 @Component({
     selector: 'vdr-asset-list',
     templateUrl: './asset-list.component.html',
     styleUrls: ['./asset-list.component.scss'],
 })
-export class AssetListComponent extends BaseListComponent<GetAssetList.Query, GetAssetList.Items>
+export class AssetListComponent
+    extends BaseListComponent<GetAssetList.Query, GetAssetList.Items>
     implements OnInit {
     searchTerm = new FormControl('');
+    uploading = false;
     paginationConfig$: Observable<PaginationInstance>;
 
     constructor(
@@ -66,47 +68,68 @@ export class AssetListComponent extends BaseListComponent<GetAssetList.Query, Ge
 
     filesSelected(files: File[]) {
         if (files.length) {
-            this.dataService.product.createAssets(files).subscribe(res => {
-                super.refresh();
-                this.notificationService.success(_('asset.notify-create-assets-success'), {
-                    count: files.length,
+            this.uploading = true;
+            this.dataService.product
+                .createAssets(files)
+                .pipe(finalize(() => (this.uploading = false)))
+                .subscribe(({ createAssets }) => {
+                    let successCount = 0;
+                    for (const result of createAssets) {
+                        switch (result.__typename) {
+                            case 'Asset':
+                                successCount++;
+                                break;
+                            case 'MimeTypeError':
+                                this.notificationService.error(result.message);
+                                break;
+                        }
+                    }
+                    if (0 < successCount) {
+                        super.refresh();
+                        this.notificationService.success(_('asset.notify-create-assets-success'), {
+                            count: successCount,
+                        });
+                    }
                 });
-            });
         }
     }
 
-    deleteAsset(asset: Asset) {
-        this.showModalAndDelete(asset.id)
+    deleteAssets(assets: Asset[]) {
+        this.showModalAndDelete(assets.map(a => a.id))
             .pipe(
                 switchMap(response => {
                     if (response.result === DeletionResult.DELETED) {
                         return [true];
                     } else {
-                        return this.showModalAndDelete(asset.id, response.message || '').pipe(
-                            map(r => r.result === DeletionResult.DELETED),
-                        );
+                        return this.showModalAndDelete(
+                            assets.map(a => a.id),
+                            response.message || '',
+                        ).pipe(map(r => r.result === DeletionResult.DELETED));
                     }
                 }),
             )
             .subscribe(
                 () => {
                     this.notificationService.success(_('common.notify-delete-success'), {
-                        entity: 'Asset',
+                        entity: 'Assets',
                     });
                     this.refresh();
                 },
                 err => {
                     this.notificationService.error(_('common.notify-delete-error'), {
-                        entity: 'Asset',
+                        entity: 'Assets',
                     });
                 },
             );
     }
 
-    private showModalAndDelete(assetId: string, message?: string) {
+    private showModalAndDelete(assetIds: string[], message?: string) {
         return this.modalService
             .dialog({
-                title: _('catalog.confirm-delete-asset'),
+                title: _('catalog.confirm-delete-assets'),
+                translationVars: {
+                    count: assetIds.length,
+                },
                 body: message,
                 buttons: [
                     { type: 'secondary', label: _('common.cancel') },
@@ -114,8 +137,8 @@ export class AssetListComponent extends BaseListComponent<GetAssetList.Query, Ge
                 ],
             })
             .pipe(
-                switchMap(res => (res ? this.dataService.product.deleteAsset(assetId, !!message) : EMPTY)),
-                map(res => res.deleteAsset),
+                switchMap(res => (res ? this.dataService.product.deleteAssets(assetIds, !!message) : EMPTY)),
+                map(res => res.deleteAssets),
             );
     }
 }

@@ -1,4 +1,6 @@
-import gql from 'graphql-tag';
+import { gql } from 'apollo-angular';
+
+import { CONFIGURABLE_OPERATION_DEF_FRAGMENT, ERROR_RESULT_FRAGMENT } from './shared-definitions';
 
 export const COUNTRY_FRAGMENT = gql`
     fragment Country on Country {
@@ -94,11 +96,16 @@ export const GET_ZONES = gql`
     query GetZones {
         zones {
             id
+            createdAt
+            updatedAt
             name
             members {
+                createdAt
+                updatedAt
                 id
                 name
                 code
+                enabled
             }
         }
     }
@@ -129,6 +136,15 @@ export const UPDATE_ZONE = gql`
         }
     }
     ${ZONE_FRAGMENT}
+`;
+
+export const DELETE_ZONE = gql`
+    mutation DeleteZone($id: ID!) {
+        deleteZone(id: $id) {
+            message
+            result
+        }
+    }
 `;
 
 export const ADD_MEMBERS_TO_ZONE = gql`
@@ -326,18 +342,22 @@ export const CREATE_CHANNEL = gql`
     mutation CreateChannel($input: CreateChannelInput!) {
         createChannel(input: $input) {
             ...Channel
+            ...ErrorResult
         }
     }
     ${CHANNEL_FRAGMENT}
+    ${ERROR_RESULT_FRAGMENT}
 `;
 
 export const UPDATE_CHANNEL = gql`
     mutation UpdateChannel($input: UpdateChannelInput!) {
         updateChannel(input: $input) {
             ...Channel
+            ...ErrorResult
         }
     }
     ${CHANNEL_FRAGMENT}
+    ${ERROR_RESULT_FRAGMENT}
 `;
 
 export const DELETE_CHANNEL = gql`
@@ -358,10 +378,13 @@ export const PAYMENT_METHOD_FRAGMENT = gql`
         enabled
         configArgs {
             name
-            type
             value
         }
+        definition {
+            ...ConfigurableOperationDef
+        }
     }
+    ${CONFIGURABLE_OPERATION_DEF_FRAGMENT}
 `;
 
 export const GET_PAYMENT_METHOD_LIST = gql`
@@ -396,8 +419,20 @@ export const UPDATE_PAYMENT_METHOD = gql`
 
 export const GLOBAL_SETTINGS_FRAGMENT = gql`
     fragment GlobalSettings on GlobalSettings {
+        id
         availableLanguages
         trackInventory
+        outOfStockThreshold
+        serverConfig {
+            permissions {
+                name
+                description
+                assignable
+            }
+            orderProcess {
+                name
+            }
+        }
     }
 `;
 
@@ -414,15 +449,18 @@ export const UPDATE_GLOBAL_SETTINGS = gql`
     mutation UpdateGlobalSettings($input: UpdateGlobalSettingsInput!) {
         updateGlobalSettings(input: $input) {
             ...GlobalSettings
+            ...ErrorResult
         }
     }
     ${GLOBAL_SETTINGS_FRAGMENT}
+    ${ERROR_RESULT_FRAGMENT}
 `;
 
 export const CUSTOM_FIELD_CONFIG_FRAGMENT = gql`
     fragment CustomFieldConfig on CustomField {
         name
         type
+        list
         description {
             languageCode
             value
@@ -522,7 +560,18 @@ export const ALL_CUSTOM_FIELDS_FRAGMENT = gql`
 export const GET_SERVER_CONFIG = gql`
     query GetServerConfig {
         globalSettings {
+            id
             serverConfig {
+                orderProcess {
+                    name
+                    to
+                }
+                permittedAssetTypes
+                permissions {
+                    name
+                    description
+                    assignable
+                }
                 customFieldConfig {
                     Address {
                         ...CustomFields
@@ -537,6 +586,9 @@ export const GET_SERVER_CONFIG = gql`
                         ...CustomFields
                     }
                     FacetValue {
+                        ...CustomFields
+                    }
+                    Fulfillment {
                         ...CustomFields
                     }
                     GlobalSettings {
@@ -558,6 +610,9 @@ export const GET_SERVER_CONFIG = gql`
                         ...CustomFields
                     }
                     ProductVariant {
+                        ...CustomFields
+                    }
+                    ShippingMethod {
                         ...CustomFields
                     }
                     User {
@@ -633,27 +688,4 @@ export const REINDEX = gql`
         }
     }
     ${JOB_INFO_FRAGMENT}
-`;
-
-export const SEARCH_FOR_TEST_ORDER = gql`
-    query SearchForTestOrder($term: String!, $take: Int!) {
-        search(input: { groupByProduct: false, term: $term, take: $take }) {
-            items {
-                productVariantId
-                productVariantName
-                productPreview
-                price {
-                    ... on SinglePrice {
-                        value
-                    }
-                }
-                priceWithTax {
-                    ... on SinglePrice {
-                        value
-                    }
-                }
-                sku
-            }
-        }
-    }
 `;

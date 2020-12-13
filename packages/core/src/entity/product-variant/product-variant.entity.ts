@@ -1,5 +1,5 @@
-import { CurrencyCode } from '@vendure/common/lib/generated-types';
-import { DeepPartial } from '@vendure/common/lib/shared-types';
+import { CurrencyCode, GlobalFlag } from '@vendure/common/lib/generated-types';
+import { DeepPartial, ID } from '@vendure/common/lib/shared-types';
 import { Column, Entity, JoinTable, ManyToMany, ManyToOne, OneToMany } from 'typeorm';
 
 import { SoftDeletable } from '../../common/types/common-types';
@@ -9,6 +9,7 @@ import { Asset } from '../asset/asset.entity';
 import { VendureEntity } from '../base/base.entity';
 import { Collection } from '../collection/collection.entity';
 import { CustomProductVariantFields } from '../custom-entity-fields';
+import { EntityId } from '../entity-id.decorator';
 import { FacetValue } from '../facet-value/facet-value.entity';
 import { ProductOption } from '../product-option/product-option.entity';
 import { Product } from '../product/product.entity';
@@ -76,10 +77,12 @@ export class ProductVariant extends VendureEntity implements Translatable, HasCu
      */
     taxRateApplied: TaxRate;
 
-    @ManyToOne(type => Asset)
+    @ManyToOne(type => Asset, { onDelete: 'SET NULL' })
     featuredAsset: Asset;
 
-    @OneToMany(type => ProductVariantAsset, productVariantAsset => productVariantAsset.productVariant)
+    @OneToMany(type => ProductVariantAsset, productVariantAsset => productVariantAsset.productVariant, {
+        onDelete: 'SET NULL',
+    })
     assets: ProductVariantAsset[];
 
     @ManyToOne(type => TaxCategory)
@@ -94,14 +97,33 @@ export class ProductVariant extends VendureEntity implements Translatable, HasCu
     @ManyToOne(type => Product, product => product.variants)
     product: Product;
 
-    @Column({ nullable: true })
-    productId: number;
+    @EntityId({ nullable: true })
+    productId: ID;
 
     @Column({ default: 0 })
     stockOnHand: number;
 
-    @Column()
-    trackInventory: boolean;
+    @Column({ default: 0 })
+    stockAllocated: number;
+
+    /**
+     * @description
+     * Specifies the value of stockOnHand at which the ProductVariant is considered
+     * out of stock.
+     */
+    @Column({ default: 0 })
+    outOfStockThreshold: number;
+
+    /**
+     * @description
+     * When true, the `outOfStockThreshold` value will be taken from the GlobalSettings and the
+     * value set on this ProductVariant will be ignored.
+     */
+    @Column({ default: true })
+    useGlobalOutOfStockThreshold: boolean;
+
+    @Column({ type: 'varchar', default: GlobalFlag.INHERIT })
+    trackInventory: GlobalFlag;
 
     @OneToMany(type => StockMovement, stockMovement => stockMovement.productVariant)
     stockMovements: StockMovement[];

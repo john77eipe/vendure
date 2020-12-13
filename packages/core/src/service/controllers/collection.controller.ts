@@ -1,21 +1,17 @@
 import { Controller } from '@nestjs/common';
 import { MessagePattern } from '@nestjs/microservices';
-import { InjectConnection } from '@nestjs/typeorm';
 import { ConfigurableOperation } from '@vendure/common/lib/generated-types';
 import { pick } from '@vendure/common/lib/pick';
 import { ID } from '@vendure/common/lib/shared-types';
 import { Observable } from 'rxjs';
-import { Connection } from 'typeorm';
 
-import {
-    facetValueCollectionFilter,
-    variantNameCollectionFilter,
-} from '../../config/collection/default-collection-filters';
+import { ConfigService } from '../../config/config.service';
 import { Logger } from '../../config/logger/vendure-logger';
 import { Collection } from '../../entity/collection/collection.entity';
 import { ProductVariant } from '../../entity/product-variant/product-variant.entity';
 import { asyncObservable } from '../../worker/async-observable';
 import { CollectionService } from '../services/collection.service';
+import { TransactionalConnection } from '../transaction/transactional-connection';
 import { ApplyCollectionFiltersMessage } from '../types/collection-messages';
 
 /**
@@ -25,8 +21,9 @@ import { ApplyCollectionFiltersMessage } from '../types/collection-messages';
 @Controller()
 export class CollectionController {
     constructor(
-        @InjectConnection() private connection: Connection,
+        private connection: TransactionalConnection,
         private collectionService: CollectionService,
+        private configService: ConfigService,
     ) {}
 
     @MessagePattern(ApplyCollectionFiltersMessage.pattern)
@@ -103,21 +100,15 @@ export class CollectionController {
         if (filters.length === 0) {
             return [];
         }
-        const facetFilters = filters.filter(f => f.code === facetValueCollectionFilter.code);
-        const variantNameFilters = filters.filter(f => f.code === variantNameCollectionFilter.code);
+        const { collectionFilters } = this.configService.catalogOptions;
         let qb = this.connection.getRepository(ProductVariant).createQueryBuilder('productVariant');
 
-        // Apply any facetValue-based filters
-        if (facetFilters.length) {
-            for (const filter of facetFilters) {
-                qb = facetValueCollectionFilter.apply(qb, filter.args);
-            }
-        }
-
-        // Apply any variant name-based filters
-        if (variantNameFilters.length) {
-            for (const filter of variantNameFilters) {
-                qb = variantNameCollectionFilter.apply(qb, filter.args);
+        for (const filterType of collectionFilters) {
+            const filtersOfType = filters.filter(f => f.code === filterType.code);
+            if (filtersOfType.length) {
+                for (const filter of filtersOfType) {
+                    qb = filterType.apply(qb, filter.args);
+                }
             }
         }
 

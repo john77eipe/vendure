@@ -23,6 +23,7 @@ const packageDir = getPackageDir();
 registerInitializer('sqljs', new SqljsInitializer(path.join(packageDir, '__data__')));
 registerInitializer('postgres', new PostgresInitializer());
 registerInitializer('mysql', new MysqlInitializer());
+registerInitializer('mariadb', new MysqlInitializer());
 
 /**
  * For local debugging of the e2e tests, we set a very long timeout value otherwise tests will
@@ -32,6 +33,13 @@ if (process.env.E2E_DEBUG) {
     // tslint:disable-next-line:no-console
     console.log('E2E_DEBUG', process.env.E2E_DEBUG, ' - setting long timeout');
     jest.setTimeout(1800 * 1000);
+}
+/**
+ * Increase default timeout in CI to 10 seconds because occasionally valid tests fail due to
+ * timeouts.
+ */
+if (process.env.CI) {
+    jest.setTimeout(10 * 1000);
 }
 
 export const testConfig = mergeConfig(defaultTestConfig, {
@@ -53,14 +61,23 @@ function getDbConfig(): ConnectionOptions {
                 type: 'postgres',
                 host: '127.0.0.1',
                 port: process.env.CI ? +(process.env.E2E_POSTGRES_PORT || 5432) : 5432,
-                username: 'postgres',
-                password: 'Be70',
+                username: 'admin',
+                password: 'secret',
+            };
+        case 'mariadb':
+            return {
+                synchronize: true,
+                type: 'mariadb',
+                host: '127.0.0.1',
+                port: process.env.CI ? +(process.env.E2E_MARIADB_PORT || 3306) : 3306,
+                username: 'root',
+                password: '',
             };
         case 'mysql':
             return {
                 synchronize: true,
                 type: 'mysql',
-                host: process.env.CI ? '127.0.0.1' : '192.168.99.100',
+                host: '127.0.0.1',
                 port: process.env.CI ? +(process.env.E2E_MYSQL_PORT || 3306) : 3306,
                 username: 'root',
                 password: '',

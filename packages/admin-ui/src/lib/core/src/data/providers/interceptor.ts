@@ -72,6 +72,8 @@ export class DefaultInterceptor implements HttpInterceptor {
                 this.displayErrorNotification(_(`error.could-not-connect-to-server`), {
                     url: `${apiHost}:${apiPort}`,
                 });
+            } else if (response.status === 503 && response.url?.endsWith('/health')) {
+                this.displayErrorNotification(_(`error.health-check-failed`));
             } else {
                 this.displayErrorNotification(this.extractErrorFromHttpResponse(response));
             }
@@ -80,7 +82,7 @@ export class DefaultInterceptor implements HttpInterceptor {
             // inside the body of the response.
             const graqhQLErrors = response.body.errors;
             if (graqhQLErrors && Array.isArray(graqhQLErrors)) {
-                const firstCode: string = graqhQLErrors[0].extensions.code;
+                const firstCode: string = graqhQLErrors[0]?.extensions?.code;
                 if (firstCode === 'FORBIDDEN') {
                     this.authService.logOut().subscribe(() => {
                         if (!window.location.pathname.includes('login')) {

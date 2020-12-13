@@ -8,9 +8,9 @@ showtoc: true
 
 This is an overview of the GraphQL Shop API, which is used when implementing a storefront application with Vendure. 
 
-{{% alert "warning" %}}
+{{< alert "warning" >}}
 This guide only lists some of the more common operations you'll need for your storefront. Please consult [the Shop API reference]({{< relref "/docs/graphql-api/shop" >}}) for a complete guide.
-{{% /alert %}}
+{{< /alert >}}
 
 ## Universal Parameters
 
@@ -31,16 +31,19 @@ There are a couple of query parameters which are valid for all GraphQL operation
 
 ## Order flow
 
-*See the [Order Workflow guide]({{< relref "/docs/developer-guide/order-workflow" >}}) for a detailed explanation of how Orders are handled in Vendure.*
+*See the [Order Workflow guide]({{< relref "order-workflow" >}}) for a detailed explanation of how Orders are handled in Vendure.*
 
 * {{< shop-api-operation operation="activeOrder" type="query" >}} returns the currently-active Order for the session.
 * {{< shop-api-operation operation="addItemToOrder" type="mutation" >}} adds an item to the order. The first time it is called will also create a new Order for the session.
 * {{< shop-api-operation operation="adjustOrderLine" type="mutation" >}} is used to adjust the quantity of an OrderLine.
 * {{< shop-api-operation operation="removeOrderLine" type="mutation" >}} removes an OrderLine from the Order.
+* {{< shop-api-operation operation="removeAllOrderLines" type="mutation" >}} removes all OrderLine from the Order.
 * {{< shop-api-operation operation="setCustomerForOrder" type="mutation" >}} specifies the Customer details (required if the customer is not logged in as an authenticated user).
 * {{< shop-api-operation operation="setOrderShippingAddress" type="mutation" >}} sets the shipping address for the Order.
 * {{< shop-api-operation operation="eligibleShippingMethods" type="mutation" >}} returns all available shipping methods based on the customer's shipping address and the contents of the Order.
 * {{< shop-api-operation operation="setOrderShippingMethod" type="mutation" >}} sets the shipping method to use.
+* {{< shop-api-operation operation="nextOrderStates" type="query" >}} returns the possible next states that the active Order can transition to
+* {{< shop-api-operation operation="transitionOrderToState" type="mutation" >}} transitions the active Order to the given state according to the [Order state machine]({{< relref "order-workflow" >}}).
 * {{< shop-api-operation operation="addPaymentToOrder" type="mutation" >}} adds a payment to the Order. If the payment amount equals the order total, then the Order will be transitioned to either the `PaymentAuthorized` or `PaymentSettled` state (depending on how the payment provider is configured) and the order process is complete from the customer's side.
 * {{< shop-api-operation operation="orderByCode" type="query" >}} allows even guest Customers to fetch the order they just placed for up to 2 hours after placing it. This is intended to be used to display an order confirmation page immediately after the order is completed.
 

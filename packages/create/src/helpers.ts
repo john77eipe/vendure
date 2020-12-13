@@ -209,9 +209,12 @@ export function installPackages(
         const child = spawn(command, args, { stdio: logLevel === 'silent' ? 'ignore' : 'inherit' });
         child.on('close', code => {
             if (code !== 0) {
+                let message = 'An error occurred when installing dependencies.';
+                if (logLevel === 'silent') {
+                    message += ' Try running with `--log-level info` or `--log-level verbose` to diagnose.';
+                }
                 reject({
-                    message:
-                        'An error occurred when installing dependencies. Try running with `--log-level info` to diagnose.',
+                    message,
                     command: `${command} ${args.join(' ')}`,
                 });
                 return;
@@ -249,11 +252,12 @@ export function getDependencies(
 function dbDriverPackage(dbType: DbType): string {
     switch (dbType) {
         case 'mysql':
+        case 'mariadb':
             return 'mysql';
         case 'postgres':
             return 'pg';
         case 'sqlite':
-            return 'sqlite3';
+            return 'better-sqlite3';
         case 'sqljs':
             return 'sql.js';
         case 'mssql':
@@ -340,8 +344,9 @@ async function checkPostgresDbExists(options: any, root: string): Promise<true> 
 function throwConnectionError(err: any) {
     throw new Error(
         `Could not connect to the database. ` +
-            `Please check the connection settings in your Vendure config.\n[${err.message ||
-                err.toString()}]`,
+            `Please check the connection settings in your Vendure config.\n[${
+                err.message || err.toString()
+            }]`,
     );
 }
 

@@ -20,9 +20,9 @@ import { ChannelListComponent } from './components/channel-list/channel-list.com
 import { CountryDetailComponent } from './components/country-detail/country-detail.component';
 import { CountryListComponent } from './components/country-list/country-list.component';
 import { GlobalSettingsComponent } from './components/global-settings/global-settings.component';
-import { JobListComponent } from './components/job-list/job-list.component';
 import { PaymentMethodDetailComponent } from './components/payment-method-detail/payment-method-detail.component';
 import { PaymentMethodListComponent } from './components/payment-method-list/payment-method-list.component';
+import { ProfileComponent } from './components/profile/profile.component';
 import { RoleDetailComponent } from './components/role-detail/role-detail.component';
 import { RoleListComponent } from './components/role-list/role-list.component';
 import { ShippingMethodDetailComponent } from './components/shipping-method-detail/shipping-method-detail.component';
@@ -31,17 +31,28 @@ import { TaxCategoryDetailComponent } from './components/tax-category-detail/tax
 import { TaxCategoryListComponent } from './components/tax-category-list/tax-category-list.component';
 import { TaxRateDetailComponent } from './components/tax-rate-detail/tax-rate-detail.component';
 import { TaxRateListComponent } from './components/tax-rate-list/tax-rate-list.component';
+import { ZoneListComponent } from './components/zone-list/zone-list.component';
 import { AdministratorResolver } from './providers/routing/administrator-resolver';
 import { ChannelResolver } from './providers/routing/channel-resolver';
 import { CountryResolver } from './providers/routing/country-resolver';
 import { GlobalSettingsResolver } from './providers/routing/global-settings-resolver';
 import { PaymentMethodResolver } from './providers/routing/payment-method-resolver';
+import { ProfileResolver } from './providers/routing/profile-resolver';
 import { RoleResolver } from './providers/routing/role-resolver';
 import { ShippingMethodResolver } from './providers/routing/shipping-method-resolver';
 import { TaxCategoryResolver } from './providers/routing/tax-category-resolver';
 import { TaxRateResolver } from './providers/routing/tax-rate-resolver';
 
 export const settingsRoutes: Route[] = [
+    {
+        path: 'profile',
+        component: ProfileComponent,
+        resolve: createResolveData(ProfileResolver),
+        canDeactivate: [CanDeactivateDetailGuard],
+        data: {
+            breadcrumb: _('breadcrumb.profile'),
+        },
+    },
     {
         path: 'administrators',
         component: AdministratorListComponent,
@@ -133,6 +144,13 @@ export const settingsRoutes: Route[] = [
         },
     },
     {
+        path: 'zones',
+        component: ZoneListComponent,
+        data: {
+            breadcrumb: _('breadcrumb.zones'),
+        },
+    },
+    {
         path: 'shipping-methods',
         component: ShippingMethodListComponent,
         data: {
@@ -173,13 +191,6 @@ export const settingsRoutes: Route[] = [
             breadcrumb: _('breadcrumb.global-settings'),
         },
     },
-    {
-        path: 'jobs',
-        component: JobListComponent,
-        data: {
-            breadcrumb: _('breadcrumb.job-queue'),
-        },
-    },
 ];
 
 export function administratorBreadcrumb(data: any, params: any) {
@@ -187,7 +198,7 @@ export function administratorBreadcrumb(data: any, params: any) {
         entity: data.entity,
         id: params.id,
         breadcrumbKey: 'breadcrumb.administrators',
-        getName: (admin) => `${admin.firstName} ${admin.lastName}`,
+        getName: admin => `${admin.firstName} ${admin.lastName}`,
         route: 'administrators',
     });
 }
@@ -197,7 +208,7 @@ export function channelBreadcrumb(data: any, params: any) {
         entity: data.entity,
         id: params.id,
         breadcrumbKey: 'breadcrumb.channels',
-        getName: (channel) => channel.code,
+        getName: channel => channel.code,
         route: 'channels',
     });
 }
@@ -207,7 +218,7 @@ export function roleBreadcrumb(data: any, params: any) {
         entity: data.entity,
         id: params.id,
         breadcrumbKey: 'breadcrumb.roles',
-        getName: (role) => role.description,
+        getName: role => role.description,
         route: 'roles',
     });
 }
@@ -217,7 +228,7 @@ export function taxCategoryBreadcrumb(data: any, params: any) {
         entity: data.entity,
         id: params.id,
         breadcrumbKey: 'breadcrumb.tax-categories',
-        getName: (category) => category.name,
+        getName: category => category.name,
         route: 'tax-categories',
     });
 }
@@ -227,7 +238,7 @@ export function taxRateBreadcrumb(data: any, params: any) {
         entity: data.entity,
         id: params.id,
         breadcrumbKey: 'breadcrumb.tax-rates',
-        getName: (category) => category.name,
+        getName: category => category.name,
         route: 'tax-rates',
     });
 }
@@ -237,7 +248,7 @@ export function countryBreadcrumb(data: any, params: any) {
         entity: data.entity,
         id: params.id,
         breadcrumbKey: 'breadcrumb.countries',
-        getName: (promotion) => promotion.name,
+        getName: promotion => promotion.name,
         route: 'countries',
     });
 }
@@ -247,7 +258,7 @@ export function shippingMethodBreadcrumb(data: any, params: any) {
         entity: data.entity,
         id: params.id,
         breadcrumbKey: 'breadcrumb.shipping-methods',
-        getName: (method) => method.description,
+        getName: method => method.name,
         route: 'shipping-methods',
     });
 }
@@ -257,7 +268,7 @@ export function paymentMethodBreadcrumb(data: any, params: any) {
         entity: data.entity,
         id: params.id,
         breadcrumbKey: 'breadcrumb.payment-methods',
-        getName: (method) => method.code,
+        getName: method => method.code,
         route: 'payment-methods',
     });
 }

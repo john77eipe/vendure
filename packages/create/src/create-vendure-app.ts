@@ -105,6 +105,14 @@ async function createApp(
             'migration:run': usingTs ? 'ts-node migration run' : 'node migration run',
             'migration:revert': usingTs ? 'ts-node migration revert' : 'node migration revert',
         },
+        /**
+         * A work-around for the breaking update of tslib as described here:
+         * https://github.com/typeorm/typeorm/issues/6054
+         * TODO: Remove this once the TypeScript team come up with a solution
+         */
+        resolutions: {
+            tslib: '1.11.2',
+        },
     };
 
     console.log();
@@ -212,7 +220,10 @@ async function createApp(
                         await checkDbConnection(config.dbConnectionOptions, root);
                         return bootstrap({
                             ...config,
-                            port,
+                            apiOptions: {
+                                ...(config.apiOptions ?? {}),
+                                port,
+                            },
                             silent: logLevel === 'silent',
                             dbConnectionOptions: {
                                 ...config.dbConnectionOptions,
@@ -237,7 +248,16 @@ async function createApp(
                     } else {
                         app = await populate(bootstrapFn, initialDataPath);
                     }
+                    // Pause to ensure the worker jobs have time to complete.
+                    if (isCi) {
+                        console.log('[CI] Pausing before close...');
+                    }
+                    await new Promise(resolve => setTimeout(resolve, isCi ? 30000 : 2000));
                     await app.close();
+                    if (isCi) {
+                        console.log('[CI] Pausing after close...');
+                        await new Promise(resolve => setTimeout(resolve, 10000));
+                    }
                 } catch (e) {
                     console.log(e);
                     throw e;

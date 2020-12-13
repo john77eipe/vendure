@@ -4,8 +4,9 @@ import { SharedModule } from '@vendure/admin-ui/core';
 
 import { CancelOrderDialogComponent } from './components/cancel-order-dialog/cancel-order-dialog.component';
 import { FulfillOrderDialogComponent } from './components/fulfill-order-dialog/fulfill-order-dialog.component';
+import { FulfillmentCardComponent } from './components/fulfillment-card/fulfillment-card.component';
 import { FulfillmentDetailComponent } from './components/fulfillment-detail/fulfillment-detail.component';
-import { HistoryEntryDetailComponent } from './components/history-entry-detail/history-entry-detail.component';
+import { FulfillmentStateLabelComponent } from './components/fulfillment-state-label/fulfillment-state-label.component';
 import { LineFulfillmentComponent } from './components/line-fulfillment/line-fulfillment.component';
 import { LineRefundsComponent } from './components/line-refunds/line-refunds.component';
 import { OrderCustomFieldsCardComponent } from './components/order-custom-fields-card/order-custom-fields-card.component';
@@ -13,6 +14,10 @@ import { OrderDetailComponent } from './components/order-detail/order-detail.com
 import { OrderHistoryComponent } from './components/order-history/order-history.component';
 import { OrderListComponent } from './components/order-list/order-list.component';
 import { OrderPaymentCardComponent } from './components/order-payment-card/order-payment-card.component';
+import { OrderProcessGraphDialogComponent } from './components/order-process-graph-dialog/order-process-graph-dialog.component';
+import { OrderProcessEdgeComponent } from './components/order-process-graph/order-process-edge.component';
+import { OrderProcessGraphComponent } from './components/order-process-graph/order-process-graph.component';
+import { OrderProcessNodeComponent } from './components/order-process-graph/order-process-node.component';
 import { PaymentDetailComponent } from './components/payment-detail/payment-detail.component';
 import { PaymentStateLabelComponent } from './components/payment-state-label/payment-state-label.component';
 import { RefundOrderDialogComponent } from './components/refund-order-dialog/refund-order-dialog.component';
@@ -38,9 +43,14 @@ import { orderRoutes } from './order.routes';
         OrderHistoryComponent,
         FulfillmentDetailComponent,
         PaymentDetailComponent,
-        HistoryEntryDetailComponent,
         SimpleItemListComponent,
         OrderCustomFieldsCardComponent,
+        OrderProcessGraphComponent,
+        OrderProcessNodeComponent,
+        OrderProcessEdgeComponent,
+        OrderProcessGraphDialogComponent,
+        FulfillmentStateLabelComponent,
+        FulfillmentCardComponent,
     ],
 })
 export class OrderModule {}

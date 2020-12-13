@@ -137,7 +137,7 @@ export class AdminUiPlugin implements OnVendureBootstrap, OnVendureClose {
         } else {
             port = this.options.port;
         }
-        config.middleware.push({
+        config.apiOptions.middleware.push({
             handler: createProxyHandler({
                 hostname: this.options.hostname,
                 port,
@@ -148,7 +148,7 @@ export class AdminUiPlugin implements OnVendureBootstrap, OnVendureClose {
             route,
         });
         if (this.isDevModeApp(app)) {
-            config.middleware.push({
+            config.apiOptions.middleware.push({
                 handler: createProxyHandler({
                     hostname: this.options.hostname,
                     port,
@@ -244,9 +244,9 @@ export class AdminUiPlugin implements OnVendureBootstrap, OnVendureClose {
             return partialConfig ? (partialConfig as AdminUiConfig)[prop] || defaultVal : defaultVal;
         };
         return {
-            adminApiPath: propOrDefault('adminApiPath', this.configService.adminApiPath),
-            apiHost: propOrDefault('apiHost', AdminUiPlugin.options.apiHost || 'http://localhost'),
-            apiPort: propOrDefault('apiPort', AdminUiPlugin.options.apiPort || this.configService.port),
+            adminApiPath: propOrDefault('adminApiPath', this.configService.apiOptions.adminApiPath),
+            apiHost: propOrDefault('apiHost', AdminUiPlugin.options.apiHost || 'auto'),
+            apiPort: propOrDefault('apiPort', AdminUiPlugin.options.apiPort || 'auto'),
             tokenMethod: propOrDefault('tokenMethod', authOptions.tokenMethod || 'cookie'),
             authTokenHeaderKey: propOrDefault(
                 'authTokenHeaderKey',
@@ -254,6 +254,7 @@ export class AdminUiPlugin implements OnVendureBootstrap, OnVendureClose {
             ),
             defaultLanguage: propOrDefault('defaultLanguage', defaultLanguage),
             availableLanguages: propOrDefault('availableLanguages', defaultAvailableLanguages),
+            loginUrl: AdminUiPlugin.options.adminUiConfig?.loginUrl,
         };
     }
 
@@ -262,42 +263,47 @@ export class AdminUiPlugin implements OnVendureBootstrap, OnVendureClose {
      * the server admin API.
      */
     private async overwriteAdminUiConfig(adminUiConfigPath: string, config: AdminUiConfig) {
-        /**
-         * It might be that the ui-devkit compiler has not yet copied the config
-         * file to the expected location (perticularly when running in watch mode),
-         * so polling is used to check multiple times with a delay.
-         */
-        async function pollForConfigFile() {
-            let configFileContent: string;
-            const maxRetries = 5;
-            const retryDelay = 200;
-            let attempts = 0;
-            return new Promise<string>(async function checkForFile(resolve, reject) {
-                if (attempts >= maxRetries) {
-                    reject();
-                }
-                try {
-                    Logger.verbose(`Checking for config file: ${adminUiConfigPath}`, loggerCtx);
-                    configFileContent = await fs.readFile(adminUiConfigPath, 'utf-8');
-                    resolve(configFileContent);
-                } catch (e) {
-                    attempts++;
-                    Logger.verbose(
-                        `Unable to locate config file: ${adminUiConfigPath} (attempt ${attempts})`,
-                        loggerCtx,
-                    );
-                    setTimeout(pollForConfigFile, retryDelay, resolve, reject);
-                }
-            });
+        try {
+            const content = await this.pollForConfigFile(adminUiConfigPath);
+        } catch (e) {
+            Logger.error(e.message, loggerCtx);
+            throw e;
         }
-
-        const content = await pollForConfigFile();
         try {
             await fs.writeFile(adminUiConfigPath, JSON.stringify(config, null, 2));
         } catch (e) {
             throw new Error('[AdminUiPlugin] Could not write vendure-ui-config.json file:\n' + e.message);
         }
         Logger.verbose(`Applied configuration to vendure-ui-config.json file`, loggerCtx);
+    }
+
+    /**
+     * It might be that the ui-devkit compiler has not yet copied the config
+     * file to the expected location (particularly when running in watch mode),
+     * so polling is used to check multiple times with a delay.
+     */
+    private async pollForConfigFile(adminUiConfigPath: string) {
+        const maxRetries = 10;
+        const retryDelay = 200;
+        let attempts = 0;
+
+        const pause = () => new Promise(resolve => setTimeout(resolve, retryDelay));
+
+        while (attempts < maxRetries) {
+            try {
+                Logger.verbose(`Checking for config file: ${adminUiConfigPath}`, loggerCtx);
+                const configFileContent = await fs.readFile(adminUiConfigPath, 'utf-8');
+                return configFileContent;
+            } catch (e) {
+                attempts++;
+                Logger.verbose(
+                    `Unable to locate config file: ${adminUiConfigPath} (attempt ${attempts})`,
+                    loggerCtx,
+                );
+            }
+            await pause();
+        }
+        throw new Error(`Unable to locate config file: ${adminUiConfigPath}`);
     }
 
     private static isDevModeApp(

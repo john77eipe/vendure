@@ -1,8 +1,9 @@
 import { LanguageCode } from '@vendure/common/lib/generated-types';
+import { ID } from '@vendure/common/lib/shared-types';
 
 import { Zone } from '../entity/zone/zone.entity';
 
-export type ZoneMap = Map<string, { entity: Zone; members: string[] }>;
+export type ZoneMap = Map<string, { entity: Zone; members: ID[] }>;
 
 export interface CountryDefinition {
     code: string;
@@ -23,6 +24,7 @@ export type CollectionFilterDefinition = FacetValueCollectionFilterDefinition;
 export interface CollectionDefinition {
     name: string;
     description?: string;
+    slug?: string;
     private?: boolean;
     filters?: CollectionFilterDefinition[];
     parentName?: string;

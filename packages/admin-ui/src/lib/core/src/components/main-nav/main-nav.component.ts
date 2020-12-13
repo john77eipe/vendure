@@ -1,8 +1,11 @@
 import { Component, OnInit } from '@angular/core';
 import { ActivatedRoute, Router } from '@angular/router';
 import { marker as _ } from '@biesbjerg/ngx-translate-extract-marker';
+import { map, startWith } from 'rxjs/operators';
 
-import { NavMenuItem } from '../../providers/nav-builder/nav-builder-types';
+import { HealthCheckService } from '../../providers/health-check/health-check.service';
+import { JobQueueService } from '../../providers/job-queue/job-queue.service';
+import { NavMenuBadge, NavMenuItem } from '../../providers/nav-builder/nav-builder-types';
 import { NavBuilderService } from '../../providers/nav-builder/nav-builder.service';
 
 @Component({
@@ -15,6 +18,8 @@ export class MainNavComponent implements OnInit {
         private route: ActivatedRoute,
         private router: Router,
         public navBuilderService: NavBuilderService,
+        private healthCheckService: HealthCheckService,
+        private jobQueueService: JobQueueService,
     ) {}
 
     ngOnInit(): void {
@@ -73,6 +78,12 @@ export class MainNavComponent implements OnInit {
                         label: _('nav.customers'),
                         routerLink: ['/customer', 'customers'],
                         icon: 'user',
+                    },
+                    {
+                        id: 'customer-groups',
+                        label: _('nav.customer-groups'),
+                        routerLink: ['/customer', 'groups'],
+                        icon: 'users',
                     },
                 ],
             },
@@ -144,6 +155,12 @@ export class MainNavComponent implements OnInit {
                         id: 'countries',
                         label: _('nav.countries'),
                         routerLink: ['/settings', 'countries'],
+                        icon: 'flag',
+                    },
+                    {
+                        id: 'zones',
+                        label: _('nav.zones'),
+                        routerLink: ['/settings', 'zones'],
                         icon: 'world',
                     },
                     {
@@ -151,6 +168,43 @@ export class MainNavComponent implements OnInit {
                         label: _('nav.global-settings'),
                         routerLink: ['/settings', 'global-settings'],
                         icon: 'cog',
+                    },
+                ],
+            },
+            {
+                id: 'system',
+                label: _('nav.system'),
+                requiresPermission: 'ReadSettings',
+                collapsible: true,
+                collapsedByDefault: true,
+                items: [
+                    {
+                        id: 'job-queue',
+                        label: _('nav.job-queue'),
+                        routerLink: ['/system', 'jobs'],
+                        icon: 'tick-chart',
+                        statusBadge: this.jobQueueService.activeJobs$.pipe(
+                            startWith([]),
+                            map(
+                                (jobs) =>
+                                    ({
+                                        type: jobs.length === 0 ? 'none' : 'info',
+                                        propagateToSection: jobs.length > 0,
+                                    } as NavMenuBadge),
+                            ),
+                        ),
+                    },
+                    {
+                        id: 'system-status',
+                        label: _('nav.system-status'),
+                        routerLink: ['/system', 'system-status'],
+                        icon: 'rack-server',
+                        statusBadge: this.healthCheckService.status$.pipe(
+                            map((status) => ({
+                                type: status === 'ok' ? 'success' : 'error',
+                                propagateToSection: status === 'error',
+                            })),
+                        ),
                     },
                 ],
             },

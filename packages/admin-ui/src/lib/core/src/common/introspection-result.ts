@@ -1,278 +1,159 @@
 // tslint:disable
 
-export interface IntrospectionResultData {
-    __schema: {
-        types: {
-            kind: string;
-            name: string;
-            possibleTypes: {
-                name: string;
-            }[];
-        }[];
+export interface PossibleTypesResultData {
+    possibleTypes: {
+        [key: string]: string[];
     };
 }
-const result: IntrospectionResultData = {
-    __schema: {
-        types: [
-            {
-                kind: 'INTERFACE',
-                name: 'Node',
-                possibleTypes: [
-                    {
-                        name: 'Channel',
-                    },
-                    {
-                        name: 'Zone',
-                    },
-                    {
-                        name: 'Country',
-                    },
-                    {
-                        name: 'Administrator',
-                    },
-                    {
-                        name: 'User',
-                    },
-                    {
-                        name: 'Role',
-                    },
-                    {
-                        name: 'Asset',
-                    },
-                    {
-                        name: 'Collection',
-                    },
-                    {
-                        name: 'ProductVariant',
-                    },
-                    {
-                        name: 'StockAdjustment',
-                    },
-                    {
-                        name: 'Sale',
-                    },
-                    {
-                        name: 'OrderLine',
-                    },
-                    {
-                        name: 'OrderItem',
-                    },
-                    {
-                        name: 'Fulfillment',
-                    },
-                    {
-                        name: 'Order',
-                    },
-                    {
-                        name: 'Customer',
-                    },
-                    {
-                        name: 'Address',
-                    },
-                    {
-                        name: 'Promotion',
-                    },
-                    {
-                        name: 'Payment',
-                    },
-                    {
-                        name: 'Refund',
-                    },
-                    {
-                        name: 'ShippingMethod',
-                    },
-                    {
-                        name: 'HistoryEntry',
-                    },
-                    {
-                        name: 'Cancellation',
-                    },
-                    {
-                        name: 'Return',
-                    },
-                    {
-                        name: 'TaxRate',
-                    },
-                    {
-                        name: 'TaxCategory',
-                    },
-                    {
-                        name: 'CustomerGroup',
-                    },
-                    {
-                        name: 'ProductOption',
-                    },
-                    {
-                        name: 'FacetValue',
-                    },
-                    {
-                        name: 'Facet',
-                    },
-                    {
-                        name: 'Job',
-                    },
-                    {
-                        name: 'PaymentMethod',
-                    },
-                    {
-                        name: 'Product',
-                    },
-                    {
-                        name: 'ProductOptionGroup',
-                    },
-                ],
-            },
-            {
-                kind: 'INTERFACE',
-                name: 'PaginatedList',
-                possibleTypes: [
-                    {
-                        name: 'AdministratorList',
-                    },
-                    {
-                        name: 'AssetList',
-                    },
-                    {
-                        name: 'ProductVariantList',
-                    },
-                    {
-                        name: 'OrderList',
-                    },
-                    {
-                        name: 'HistoryEntryList',
-                    },
-                    {
-                        name: 'CollectionList',
-                    },
-                    {
-                        name: 'CountryList',
-                    },
-                    {
-                        name: 'CustomerList',
-                    },
-                    {
-                        name: 'FacetList',
-                    },
-                    {
-                        name: 'JobList',
-                    },
-                    {
-                        name: 'PaymentMethodList',
-                    },
-                    {
-                        name: 'ProductList',
-                    },
-                    {
-                        name: 'PromotionList',
-                    },
-                    {
-                        name: 'RoleList',
-                    },
-                    {
-                        name: 'ShippingMethodList',
-                    },
-                    {
-                        name: 'TaxRateList',
-                    },
-                ],
-            },
-            {
-                kind: 'UNION',
-                name: 'StockMovementItem',
-                possibleTypes: [
-                    {
-                        name: 'StockAdjustment',
-                    },
-                    {
-                        name: 'Sale',
-                    },
-                    {
-                        name: 'Cancellation',
-                    },
-                    {
-                        name: 'Return',
-                    },
-                ],
-            },
-            {
-                kind: 'INTERFACE',
-                name: 'StockMovement',
-                possibleTypes: [
-                    {
-                        name: 'StockAdjustment',
-                    },
-                    {
-                        name: 'Sale',
-                    },
-                    {
-                        name: 'Cancellation',
-                    },
-                    {
-                        name: 'Return',
-                    },
-                ],
-            },
-            {
-                kind: 'UNION',
-                name: 'CustomFieldConfig',
-                possibleTypes: [
-                    {
-                        name: 'StringCustomFieldConfig',
-                    },
-                    {
-                        name: 'LocaleStringCustomFieldConfig',
-                    },
-                    {
-                        name: 'IntCustomFieldConfig',
-                    },
-                    {
-                        name: 'FloatCustomFieldConfig',
-                    },
-                    {
-                        name: 'BooleanCustomFieldConfig',
-                    },
-                    {
-                        name: 'DateTimeCustomFieldConfig',
-                    },
-                ],
-            },
-            {
-                kind: 'INTERFACE',
-                name: 'CustomField',
-                possibleTypes: [
-                    {
-                        name: 'StringCustomFieldConfig',
-                    },
-                    {
-                        name: 'LocaleStringCustomFieldConfig',
-                    },
-                    {
-                        name: 'IntCustomFieldConfig',
-                    },
-                    {
-                        name: 'FloatCustomFieldConfig',
-                    },
-                    {
-                        name: 'BooleanCustomFieldConfig',
-                    },
-                    {
-                        name: 'DateTimeCustomFieldConfig',
-                    },
-                ],
-            },
-            {
-                kind: 'UNION',
-                name: 'SearchResultPrice',
-                possibleTypes: [
-                    {
-                        name: 'PriceRange',
-                    },
-                    {
-                        name: 'SinglePrice',
-                    },
-                ],
-            },
+const result: PossibleTypesResultData = {
+    possibleTypes: {
+        CreateAssetResult: ['Asset', 'MimeTypeError'],
+        NativeAuthenticationResult: ['CurrentUser', 'InvalidCredentialsError', 'NativeAuthStrategyError'],
+        AuthenticationResult: ['CurrentUser', 'InvalidCredentialsError'],
+        CreateChannelResult: ['Channel', 'LanguageNotAvailableError'],
+        UpdateChannelResult: ['Channel', 'LanguageNotAvailableError'],
+        CreateCustomerResult: ['Customer', 'EmailAddressConflictError'],
+        UpdateCustomerResult: ['Customer', 'EmailAddressConflictError'],
+        UpdateGlobalSettingsResult: ['GlobalSettings', 'ChannelDefaultLanguageError'],
+        TransitionOrderToStateResult: ['Order', 'OrderStateTransitionError'],
+        SettlePaymentResult: [
+            'Payment',
+            'SettlePaymentError',
+            'PaymentStateTransitionError',
+            'OrderStateTransitionError',
         ],
+        AddFulfillmentToOrderResult: [
+            'Fulfillment',
+            'EmptyOrderLineSelectionError',
+            'ItemsAlreadyFulfilledError',
+            'InsufficientStockOnHandError',
+        ],
+        CancelOrderResult: [
+            'Order',
+            'EmptyOrderLineSelectionError',
+            'QuantityTooGreatError',
+            'MultipleOrderError',
+            'CancelActiveOrderError',
+            'OrderStateTransitionError',
+        ],
+        RefundOrderResult: [
+            'Refund',
+            'QuantityTooGreatError',
+            'NothingToRefundError',
+            'OrderStateTransitionError',
+            'MultipleOrderError',
+            'PaymentOrderMismatchError',
+            'RefundOrderStateError',
+            'AlreadyRefundedError',
+            'RefundStateTransitionError',
+        ],
+        SettleRefundResult: ['Refund', 'RefundStateTransitionError'],
+        TransitionFulfillmentToStateResult: ['Fulfillment', 'FulfillmentStateTransitionError'],
+        RemoveOptionGroupFromProductResult: ['Product', 'ProductOptionInUseError'],
+        CreatePromotionResult: ['Promotion', 'MissingConditionsError'],
+        UpdatePromotionResult: ['Promotion', 'MissingConditionsError'],
+        PaginatedList: [
+            'CustomerGroupList',
+            'JobList',
+            'PaymentMethodList',
+            'AdministratorList',
+            'AssetList',
+            'CollectionList',
+            'ProductVariantList',
+            'CountryList',
+            'CustomerList',
+            'FacetList',
+            'HistoryEntryList',
+            'OrderList',
+            'ProductList',
+            'PromotionList',
+            'RoleList',
+            'ShippingMethodList',
+            'TaxRateList',
+        ],
+        Node: [
+            'Collection',
+            'Customer',
+            'Facet',
+            'Fulfillment',
+            'Job',
+            'Order',
+            'Product',
+            'ProductVariant',
+            'Address',
+            'Administrator',
+            'Asset',
+            'Channel',
+            'Country',
+            'CustomerGroup',
+            'FacetValue',
+            'HistoryEntry',
+            'OrderItem',
+            'OrderLine',
+            'Payment',
+            'Refund',
+            'PaymentMethod',
+            'ProductOptionGroup',
+            'ProductOption',
+            'Promotion',
+            'Role',
+            'ShippingMethod',
+            'StockAdjustment',
+            'Allocation',
+            'Sale',
+            'Cancellation',
+            'Return',
+            'Release',
+            'TaxCategory',
+            'TaxRate',
+            'User',
+            'AuthenticationMethod',
+            'Zone',
+        ],
+        ErrorResult: [
+            'MimeTypeError',
+            'LanguageNotAvailableError',
+            'ChannelDefaultLanguageError',
+            'SettlePaymentError',
+            'EmptyOrderLineSelectionError',
+            'ItemsAlreadyFulfilledError',
+            'InsufficientStockOnHandError',
+            'MultipleOrderError',
+            'CancelActiveOrderError',
+            'PaymentOrderMismatchError',
+            'RefundOrderStateError',
+            'NothingToRefundError',
+            'AlreadyRefundedError',
+            'QuantityTooGreatError',
+            'RefundStateTransitionError',
+            'PaymentStateTransitionError',
+            'FulfillmentStateTransitionError',
+            'ProductOptionInUseError',
+            'MissingConditionsError',
+            'NativeAuthStrategyError',
+            'InvalidCredentialsError',
+            'OrderStateTransitionError',
+            'EmailAddressConflictError',
+        ],
+        CustomField: [
+            'StringCustomFieldConfig',
+            'LocaleStringCustomFieldConfig',
+            'IntCustomFieldConfig',
+            'FloatCustomFieldConfig',
+            'BooleanCustomFieldConfig',
+            'DateTimeCustomFieldConfig',
+        ],
+        CustomFieldConfig: [
+            'StringCustomFieldConfig',
+            'LocaleStringCustomFieldConfig',
+            'IntCustomFieldConfig',
+            'FloatCustomFieldConfig',
+            'BooleanCustomFieldConfig',
+            'DateTimeCustomFieldConfig',
+        ],
+        SearchResultPrice: ['PriceRange', 'SinglePrice'],
+        StockMovement: ['StockAdjustment', 'Allocation', 'Sale', 'Cancellation', 'Return', 'Release'],
+        StockMovementItem: ['StockAdjustment', 'Allocation', 'Sale', 'Cancellation', 'Return', 'Release'],
     },
 };
 export default result;

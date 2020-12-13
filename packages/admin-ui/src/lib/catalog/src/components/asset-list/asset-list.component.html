@@ -12,6 +12,7 @@
         <vdr-action-bar-items locationId="asset-list"></vdr-action-bar-items>
         <vdr-asset-file-input
             (selectFiles)="filesSelected($event)"
+            [uploading]="uploading"
             dropZoneTarget=".content-area"
         ></vdr-asset-file-input>
     </vdr-ab-right>
@@ -21,7 +22,7 @@
     [assets]="(items$ | async)! | paginate: (paginationConfig$ | async) || {}"
     [multiSelect]="true"
     [canDelete]="'DeleteCatalog' | hasPermission"
-    (deleteAsset)="deleteAsset($event)"
+    (deleteAssets)="deleteAssets($event)"
 ></vdr-asset-gallery>
 
 <div class="paging-controls">

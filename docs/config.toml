@@ -4,6 +4,7 @@ title = "Vendure E-commerce"
 googleAnalytics = "UA-133911942-1"
 pygmentsCodeFences = true
 pygmentsUseClasses = true
+enableGitInfo = true
 images = ["share-image.jpg"]
 disableKinds = [
   "taxonomy",
@@ -13,4 +14,10 @@ disableKinds = [
     BookSection = "docs"
 [permalinks]
     blog = "/blog/:year/:month/:slug/"
-
+[markup]
+  [markup.goldmark]
+    [markup.goldmark.renderer]
+      unsafe = true
+  [markup.tableOfContents]
+    endLevel = 3
+    startLevel = 1

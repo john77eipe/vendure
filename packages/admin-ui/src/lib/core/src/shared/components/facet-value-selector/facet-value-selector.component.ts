@@ -1,9 +1,18 @@
-import { ChangeDetectionStrategy, Component, EventEmitter, Input, OnInit, Output } from '@angular/core';
+import {
+    ChangeDetectionStrategy,
+    Component,
+    EventEmitter,
+    Input,
+    OnInit,
+    Output,
+    ViewChild,
+} from '@angular/core';
 import { ControlValueAccessor, NG_VALUE_ACCESSOR } from '@angular/forms';
-import { DataService } from '../../../data/providers/data.service';
+import { NgSelectComponent } from '@ng-select/ng-select';
 
 import { FacetValue, FacetWithValues } from '../../../common/generated-types';
 import { flattenFacetValues } from '../../../common/utilities/flatten-facet-values';
+import { DataService } from '../../../data/providers/data.service';
 
 export type FacetValueSeletorItem = {
     name: string;
@@ -29,6 +38,8 @@ export class FacetValueSelectorComponent implements OnInit, ControlValueAccessor
     @Output() selectedValuesChange = new EventEmitter<FacetValue.Fragment[]>();
     @Input() facets: FacetWithValues.Fragment[];
     @Input() readonly = false;
+
+    @ViewChild(NgSelectComponent) private ngSelect: NgSelectComponent;
 
     facetValues: FacetValueSeletorItem[] = [];
     onChangeFn: (val: any) => void;
@@ -63,7 +74,11 @@ export class FacetValueSelectorComponent implements OnInit, ControlValueAccessor
         this.disabled = isDisabled;
     }
 
-    writeValue(obj: string | FacetValue.Fragment[] | null): void {
+    focus() {
+        this.ngSelect.focus();
+    }
+
+    writeValue(obj: string | FacetValue.Fragment[] | Array<string | number> | null): void {
         if (typeof obj === 'string') {
             try {
                 const facetIds = JSON.parse(obj) as string[];
@@ -72,8 +87,14 @@ export class FacetValueSelectorComponent implements OnInit, ControlValueAccessor
                 // TODO: log error
                 throw err;
             }
-        } else if (obj) {
-            this.value = obj.map(fv => fv.id);
+        } else if (Array.isArray(obj)) {
+            const isIdArray = (input: unknown[]): input is Array<string | number> =>
+                input.every(i => typeof i === 'number' || typeof i === 'string');
+            if (isIdArray(obj)) {
+                this.value = obj.map(fv => fv.toString());
+            } else {
+                this.value = obj.map(fv => fv.id);
+            }
         }
     }
 
@@ -84,5 +105,5 @@ export class FacetValueSelectorComponent implements OnInit, ControlValueAccessor
             id: facetValue.id,
             value: facetValue,
         };
-    }
+    };
 }

@@ -18,6 +18,13 @@
                 [(ngModel)]="password"
                 [placeholder]="'common.password' | translate"
             />
+            <clr-alert [clrAlertType]="'danger'"  [clrAlertClosable]="false" [class.visible]="errorMessage" class="login-error">
+                <clr-alert-item>
+                    <span class="alert-text">
+                        {{ errorMessage }}
+                    </span>
+                </clr-alert-item>
+            </clr-alert>
             <clr-checkbox-wrapper>
                 <input
                     type="checkbox"

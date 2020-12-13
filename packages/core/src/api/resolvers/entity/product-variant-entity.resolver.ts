@@ -3,7 +3,7 @@ import { StockMovementListOptions } from '@vendure/common/lib/generated-types';
 import { PaginatedList } from '@vendure/common/lib/shared-types';
 
 import { Translated } from '../../../common/types/locale-types';
-import { Asset, FacetValue, ProductOption } from '../../../entity';
+import { Asset, FacetValue, Product, ProductOption } from '../../../entity';
 import { ProductVariant } from '../../../entity/product-variant/product-variant.entity';
 import { StockMovement } from '../../../entity/stock-movement/stock-movement.entity';
 import { AssetService } from '../../../service/services/asset.service';
@@ -19,11 +19,22 @@ export class ProductVariantEntityResolver {
     constructor(private productVariantService: ProductVariantService, private assetService: AssetService) {}
 
     @ResolveField()
+    async product(
+        @Ctx() ctx: RequestContext,
+        @Parent() productVariant: ProductVariant,
+    ): Promise<Product | undefined> {
+        if (productVariant.product) {
+            return productVariant.product;
+        }
+        return this.productVariantService.getProductForVariant(ctx, productVariant);
+    }
+
+    @ResolveField()
     async assets(
         @Ctx() ctx: RequestContext,
         @Parent() productVariant: ProductVariant,
     ): Promise<Asset[] | undefined> {
-        return this.assetService.getEntityAssets(productVariant);
+        return this.assetService.getEntityAssets(ctx, productVariant);
     }
 
     @ResolveField()
@@ -34,7 +45,7 @@ export class ProductVariantEntityResolver {
         if (productVariant.featuredAsset) {
             return productVariant.featuredAsset;
         }
-        return this.assetService.getFeaturedAsset(productVariant);
+        return this.assetService.getFeaturedAsset(ctx, productVariant);
     }
 
     @ResolveField()

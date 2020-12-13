@@ -1,10 +1,11 @@
 import { SUPER_ADMIN_USER_IDENTIFIER, SUPER_ADMIN_USER_PASSWORD } from '@vendure/common/lib/shared-constants';
 import { VendureConfig } from '@vendure/core';
+import FormData from 'form-data';
+import fs from 'fs';
 import { DocumentNode } from 'graphql';
 import gql from 'graphql-tag';
 import { print } from 'graphql/language/printer';
 import fetch, { RequestInit, Response } from 'node-fetch';
-import { Curl } from 'node-libcurl';
 import { stringify } from 'querystring';
 
 import { QueryParams } from './types';
@@ -13,12 +14,16 @@ import { createUploadPostData } from './utils/create-upload-post-data';
 const LOGIN = gql`
     mutation($username: String!, $password: String!) {
         login(username: $username, password: $password) {
-            user {
+            ... on CurrentUser {
                 id
                 identifier
                 channels {
                     token
                 }
+            }
+            ... on ErrorResult {
+                errorCode
+                message
             }
         }
     }
@@ -53,7 +58,9 @@ export class SimpleGraphQLClient {
      */
     setChannelToken(token: string | null) {
         this.channelToken = token;
-        this.headers[this.vendureConfig.channelTokenKey] = this.channelToken;
+        if (this.vendureConfig.apiOptions.channelTokenKey) {
+            this.headers[this.vendureConfig.apiOptions.channelTokenKey] = this.channelToken;
+        }
     }
 
     /**
@@ -126,14 +133,16 @@ export class SimpleGraphQLClient {
             await this.query(
                 gql`
                     mutation {
-                        logout
+                        logout {
+                            success
+                        }
                     }
                 `,
             );
         }
         const result = await this.query(LOGIN, { username, password });
-        if (result.login.user.channels.length === 1) {
-            this.setChannelToken(result.login.user.channels[0].token);
+        if (result.login.channels?.length === 1) {
+            this.setChannelToken(result.login.channels[0].token);
         }
         return result.login;
     }
@@ -143,7 +152,11 @@ export class SimpleGraphQLClient {
      * Logs in as the SuperAdmin user.
      */
     async asSuperAdmin() {
-        await this.asUserWithCredentials(SUPER_ADMIN_USER_IDENTIFIER, SUPER_ADMIN_USER_PASSWORD);
+        const { superadminCredentials } = this.vendureConfig.authOptions;
+        await this.asUserWithCredentials(
+            superadminCredentials?.identifier ?? SUPER_ADMIN_USER_IDENTIFIER,
+            superadminCredentials?.password ?? SUPER_ADMIN_USER_PASSWORD,
+        );
     }
 
     /**
@@ -154,7 +167,9 @@ export class SimpleGraphQLClient {
         await this.query(
             gql`
                 mutation {
-                    logout
+                    logout {
+                        success
+                    }
                 }
             `,
         );
@@ -190,64 +205,48 @@ export class SimpleGraphQLClient {
 
     /**
      * @description
-     * Uses curl to post a multipart/form-data request to the server. Due to differences between the Node and browser
-     * environments, we cannot just use an existing library like apollo-upload-client.
+     * Perform a file upload mutation.
      *
      * Upload spec: https://github.com/jaydenseric/graphql-multipart-request-spec
      * Discussion of issue: https://github.com/jaydenseric/apollo-upload-client/issues/32
      */
-    fileUploadMutation(options: {
+    async fileUploadMutation(options: {
         mutation: DocumentNode;
         filePaths: string[];
         mapVariables: (filePaths: string[]) => any;
     }): Promise<any> {
         const { mutation, filePaths, mapVariables } = options;
-        return new Promise((resolve, reject) => {
-            const curl = new Curl();
 
-            const postData = createUploadPostData(mutation, filePaths, mapVariables);
-            const processedPostData = [
-                {
-                    name: 'operations',
-                    contents: JSON.stringify(postData.operations),
-                },
-                {
-                    name: 'map',
-                    contents:
-                        '{' +
-                        Object.entries(postData.map)
-                            .map(([i, path]) => `"${i}":["${path}"]`)
-                            .join(',') +
-                        '}',
-                },
-                ...postData.filePaths,
-            ];
-            curl.setOpt(Curl.option.URL, this.apiUrl);
-            curl.setOpt(Curl.option.VERBOSE, false);
-            curl.setOpt(Curl.option.TIMEOUT_MS, 30000);
-            curl.setOpt(Curl.option.HTTPPOST, processedPostData);
-            curl.setOpt(Curl.option.HTTPHEADER, [
-                `Authorization: Bearer ${this.authToken}`,
-                `${this.vendureConfig.channelTokenKey}: ${this.channelToken}`,
-            ]);
-            curl.perform();
-            curl.on('end', (statusCode: any, body: any) => {
-                curl.close();
-                const response = JSON.parse(body);
-                if (response.errors && response.errors.length) {
-                    const error = response.errors[0];
-                    console.log(JSON.stringify(error.extensions, null, 2));
-                    throw new Error(error.message);
-                }
-                resolve(response.data);
-            });
+        const postData = createUploadPostData(mutation, filePaths, mapVariables);
+        const body = new FormData();
+        body.append('operations', JSON.stringify(postData.operations));
+        body.append(
+            'map',
+            '{' +
+                Object.entries(postData.map)
+                    .map(([i, path]) => `"${i}":["${path}"]`)
+                    .join(',') +
+                '}',
+        );
+        for (const filePath of postData.filePaths) {
+            const file = fs.readFileSync(filePath.file);
+            body.append(filePath.name, file, { filename: filePath.file });
+        }
 
-            curl.on('error', (err: any) => {
-                curl.close();
-                console.log(err);
-                reject(err);
-            });
+        const result = await fetch(this.apiUrl, {
+            method: 'POST',
+            body,
+            headers: {
+                ...this.headers,
+            },
         });
+
+        const response = await result.json();
+        if (response.errors && response.errors.length) {
+            const error = response.errors[0];
+            throw new Error(error.message);
+        }
+        return response.data;
     }
 }
 

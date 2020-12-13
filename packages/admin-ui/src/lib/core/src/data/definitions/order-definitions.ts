@@ -1,4 +1,6 @@
-import gql from 'graphql-tag';
+import { gql } from 'apollo-angular';
+
+import { ERROR_RESULT_FRAGMENT } from './shared-definitions';
 
 export const ADJUSTMENT_FRAGMENT = gql`
     fragment Adjustment on Adjustment {
@@ -21,8 +23,8 @@ export const REFUND_FRAGMENT = gql`
     }
 `;
 
-export const SHIPPING_ADDRESS_FRAGMENT = gql`
-    fragment ShippingAddress on OrderAddress {
+export const ORDER_ADDRESS_FRAGMENT = gql`
+    fragment OrderAddress on OrderAddress {
         fullName
         company
         streetLine1
@@ -40,8 +42,10 @@ export const ORDER_FRAGMENT = gql`
         id
         createdAt
         updatedAt
+        orderPlacedAt
         code
         state
+        nextStates
         total
         currencyCode
         customer {
@@ -55,6 +59,8 @@ export const ORDER_FRAGMENT = gql`
 export const FULFILLMENT_FRAGMENT = gql`
     fragment Fulfillment on Fulfillment {
         id
+        state
+        nextStates
         createdAt
         updatedAt
         method
@@ -72,6 +78,8 @@ export const ORDER_LINE_FRAGMENT = gql`
             id
             name
             sku
+            trackInventory
+            stockOnHand
         }
         adjustments {
             ...Adjustment
@@ -82,7 +90,6 @@ export const ORDER_LINE_FRAGMENT = gql`
         items {
             id
             unitPrice
-            unitPriceIncludesTax
             unitPriceWithTax
             taxRate
             refundId
@@ -91,7 +98,9 @@ export const ORDER_LINE_FRAGMENT = gql`
                 ...Fulfillment
             }
         }
-        totalPrice
+        linePrice
+        lineTax
+        linePriceWithTax
     }
 `;
 
@@ -102,6 +111,7 @@ export const ORDER_DETAIL_FRAGMENT = gql`
         updatedAt
         code
         state
+        nextStates
         active
         customer {
             id
@@ -127,10 +137,14 @@ export const ORDER_DETAIL_FRAGMENT = gql`
         shippingMethod {
             id
             code
+            name
             description
         }
         shippingAddress {
-            ...ShippingAddress
+            ...OrderAddress
+        }
+        billingAddress {
+            ...OrderAddress
         }
         payments {
             id
@@ -163,7 +177,7 @@ export const ORDER_DETAIL_FRAGMENT = gql`
         total
     }
     ${ADJUSTMENT_FRAGMENT}
-    ${SHIPPING_ADDRESS_FRAGMENT}
+    ${ORDER_ADDRESS_FRAGMENT}
     ${FULFILLMENT_FRAGMENT}
     ${ORDER_LINE_FRAGMENT}
 `;
@@ -192,50 +206,71 @@ export const GET_ORDER = gql`
 export const SETTLE_PAYMENT = gql`
     mutation SettlePayment($id: ID!) {
         settlePayment(id: $id) {
-            id
-            transactionId
-            amount
-            method
-            state
-            metadata
+            ... on Payment {
+                id
+                transactionId
+                amount
+                method
+                state
+                metadata
+            }
+            ...ErrorResult
+            ... on SettlePaymentError {
+                paymentErrorMessage
+            }
+            ... on PaymentStateTransitionError {
+                transitionError
+            }
+            ... on OrderStateTransitionError {
+                transitionError
+            }
         }
     }
+    ${ERROR_RESULT_FRAGMENT}
 `;
 
 export const CREATE_FULFILLMENT = gql`
     mutation CreateFulfillment($input: FulfillOrderInput!) {
-        fulfillOrder(input: $input) {
+        addFulfillmentToOrder(input: $input) {
             ...Fulfillment
+            ...ErrorResult
         }
     }
     ${FULFILLMENT_FRAGMENT}
+    ${ERROR_RESULT_FRAGMENT}
 `;
 
 export const CANCEL_ORDER = gql`
     mutation CancelOrder($input: CancelOrderInput!) {
         cancelOrder(input: $input) {
             ...OrderDetail
+            ...ErrorResult
         }
     }
     ${ORDER_DETAIL_FRAGMENT}
+    ${ERROR_RESULT_FRAGMENT}
 `;
 
 export const REFUND_ORDER = gql`
     mutation RefundOrder($input: RefundOrderInput!) {
         refundOrder(input: $input) {
             ...Refund
+            ...ErrorResult
         }
     }
     ${REFUND_FRAGMENT}
+    ${ERROR_RESULT_FRAGMENT}
 `;
 
 export const SETTLE_REFUND = gql`
     mutation SettleRefund($input: SettleRefundInput!) {
         settleRefund(input: $input) {
             ...Refund
+            ...ErrorResult
         }
     }
     ${REFUND_FRAGMENT}
+    ${ERROR_RESULT_FRAGMENT}
 `;
 
 export const GET_ORDER_HISTORY = gql`
@@ -267,4 +302,60 @@ export const ADD_NOTE_TO_ORDER = gql`
             id
         }
     }
+`;
+
+export const UPDATE_ORDER_NOTE = gql`
+    mutation UpdateOrderNote($input: UpdateOrderNoteInput!) {
+        updateOrderNote(input: $input) {
+            id
+            data
+            isPublic
+        }
+    }
+`;
+
+export const DELETE_ORDER_NOTE = gql`
+    mutation DeleteOrderNote($id: ID!) {
+        deleteOrderNote(id: $id) {
+            result
+            message
+        }
+    }
+`;
+
+export const TRANSITION_ORDER_TO_STATE = gql`
+    mutation TransitionOrderToState($id: ID!, $state: String!) {
+        transitionOrderToState(id: $id, state: $state) {
+            ...Order
+            ...ErrorResult
+            ... on OrderStateTransitionError {
+                transitionError
+            }
+        }
+    }
+    ${ORDER_FRAGMENT}
+    ${ERROR_RESULT_FRAGMENT}
+`;
+
+export const UPDATE_ORDER_CUSTOM_FIELDS = gql`
+    mutation UpdateOrderCustomFields($input: UpdateOrderInput!) {
+        setOrderCustomFields(input: $input) {
+            ...Order
+        }
+    }
+    ${ORDER_FRAGMENT}
+`;
+
+export const TRANSITION_FULFILLMENT_TO_STATE = gql`
+    mutation TransitionFulfillmentToState($id: ID!, $state: String!) {
+        transitionFulfillmentToState(id: $id, state: $state) {
+            ...Fulfillment
+            ...ErrorResult
+            ... on FulfillmentStateTransitionError {
+                transitionError
+            }
+        }
+    }
+    ${FULFILLMENT_FRAGMENT}
+    ${ERROR_RESULT_FRAGMENT}
 `;

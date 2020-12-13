@@ -2,6 +2,8 @@ type Query {
     products(options: ProductListOptions): ProductList!
     "Get a Product either by id or slug. If neither id nor slug is speicified, an error will result."
     product(id: ID, slug: String): Product
+    "Get a ProductVariant by id"
+    productVariant(id: ID!): ProductVariant
 }
 
 type Mutation {
@@ -18,7 +20,7 @@ type Mutation {
     addOptionGroupToProduct(productId: ID!, optionGroupId: ID!): Product!
 
     "Remove an OptionGroup from a Product"
-    removeOptionGroupFromProduct(productId: ID!, optionGroupId: ID!): Product!
+    removeOptionGroupFromProduct(productId: ID!, optionGroupId: ID!): RemoveOptionGroupFromProductResult!
 
     "Create a set of ProductVariants based on the OptionGroups assigned to the given Product"
     createProductVariants(input: [CreateProductVariantInput!]!): [ProductVariant]!
@@ -43,8 +45,11 @@ type Product implements Node {
 
 type ProductVariant implements Node {
     enabled: Boolean!
+    trackInventory: GlobalFlag!
     stockOnHand: Int!
-    trackInventory: Boolean!
+    stockAllocated: Int!
+    outOfStockThreshold: Int!
+    useGlobalOutOfStockThreshold: Boolean!
     stockMovements(options: StockMovementListOptions): StockMovementList!
 }
 
@@ -110,7 +115,9 @@ input CreateProductVariantInput {
     featuredAssetId: ID
     assetIds: [ID!]
     stockOnHand: Int
-    trackInventory: Boolean
+    outOfStockThreshold: Int
+    useGlobalOutOfStockThreshold: Boolean
+    trackInventory: GlobalFlag
 }
 
 input UpdateProductVariantInput {
@@ -124,7 +131,9 @@ input UpdateProductVariantInput {
     featuredAssetId: ID
     assetIds: [ID!]
     stockOnHand: Int
-    trackInventory: Boolean
+    outOfStockThreshold: Int
+    useGlobalOutOfStockThreshold: Boolean
+    trackInventory: GlobalFlag
 }
 
 input AssignProductsToChannelInput {
@@ -137,3 +146,12 @@ input RemoveProductsFromChannelInput {
     productIds: [ID!]!
     channelId: ID!
 }
+
+type ProductOptionInUseError implements ErrorResult {
+    errorCode: ErrorCode!
+    message: String!
+    optionGroupCode: String!
+    productVariantCount: Int!
+}
+
+union RemoveOptionGroupFromProductResult = Product | ProductOptionInUseError

@@ -1,6 +1,10 @@
 import { Transport } from '@nestjs/microservices';
 import { LanguageCode } from '@vendure/common/lib/generated-types';
-import { DEFAULT_AUTH_TOKEN_HEADER_KEY } from '@vendure/common/lib/shared-constants';
+import {
+    DEFAULT_AUTH_TOKEN_HEADER_KEY,
+    SUPER_ADMIN_USER_IDENTIFIER,
+    SUPER_ADMIN_USER_PASSWORD,
+} from '@vendure/common/lib/shared-constants';
 
 import { generatePublicId } from '../common/generate-public-id';
 import { InMemoryJobQueueStrategy } from '../job-queue/in-memory-job-queue-strategy';
@@ -8,13 +12,18 @@ import { InMemoryJobQueueStrategy } from '../job-queue/in-memory-job-queue-strat
 import { DefaultAssetNamingStrategy } from './asset-naming-strategy/default-asset-naming-strategy';
 import { NoAssetPreviewStrategy } from './asset-preview-strategy/no-asset-preview-strategy';
 import { NoAssetStorageStrategy } from './asset-storage-strategy/no-asset-storage-strategy';
+import { NativeAuthenticationStrategy } from './auth/native-authentication-strategy';
+import { defaultCollectionFilters } from './collection/default-collection-filters';
 import { AutoIncrementIdStrategy } from './entity-id-strategy/auto-increment-id-strategy';
 import { DefaultLogger } from './logger/default-logger';
 import { TypeOrmLogger } from './logger/typeorm-logger';
-import { MergeOrdersStrategy } from './order-merge-strategy/merge-orders-strategy';
-import { UseGuestStrategy } from './order-merge-strategy/use-guest-strategy';
-import { defaultPromotionActions } from './promotion/default-promotion-actions';
-import { defaultPromotionConditions } from './promotion/default-promotion-conditions';
+import { DefaultPriceCalculationStrategy } from './order/default-price-calculation-strategy';
+import { DefaultStockAllocationStrategy } from './order/default-stock-allocation-strategy';
+import { MergeOrdersStrategy } from './order/merge-orders-strategy';
+import { DefaultOrderCodeStrategy } from './order/order-code-strategy';
+import { UseGuestStrategy } from './order/use-guest-strategy';
+import { defaultPromotionActions, defaultPromotionConditions } from './promotion';
+import { InMemorySessionCacheStrategy } from './session-cache/in-memory-session-cache-strategy';
 import { defaultShippingCalculator } from './shipping-method/default-shipping-calculator';
 import { defaultShippingEligibilityChecker } from './shipping-method/default-shipping-eligibility-checker';
 import { DefaultTaxCalculationStrategy } from './tax/default-tax-calculation-strategy';
@@ -28,38 +37,62 @@ import { RuntimeVendureConfig } from './vendure-config';
  * @docsCategory configuration
  */
 export const defaultConfig: RuntimeVendureConfig = {
-    channelTokenKey: 'vendure-token',
     defaultChannelToken: null,
     defaultLanguageCode: LanguageCode.en,
-    hostname: '',
-    port: 3000,
-    cors: {
-        origin: true,
-        credentials: true,
-    },
     logger: new DefaultLogger(),
+    apiOptions: {
+        hostname: '',
+        port: 3000,
+        adminApiPath: 'admin-api',
+        adminApiPlayground: false,
+        adminApiDebug: false,
+        shopApiPath: 'shop-api',
+        shopApiPlayground: false,
+        shopApiDebug: false,
+        channelTokenKey: 'vendure-token',
+        cors: {
+            origin: true,
+            credentials: true,
+        },
+        middleware: [],
+        apolloServerPlugins: [],
+    },
     authOptions: {
         disableAuth: false,
         tokenMethod: 'cookie',
-        sessionSecret: 'session-secret',
+        sessionSecret: '',
+        cookieOptions: {
+            secret: Math.random().toString(36).substr(3),
+            httpOnly: true,
+        },
         authTokenHeaderKey: DEFAULT_AUTH_TOKEN_HEADER_KEY,
-        sessionDuration: '7d',
+        sessionDuration: '1y',
+        sessionCacheStrategy: new InMemorySessionCacheStrategy(),
+        sessionCacheTTL: 300,
         requireVerification: true,
         verificationTokenDuration: '7d',
+        superadminCredentials: {
+            identifier: SUPER_ADMIN_USER_IDENTIFIER,
+            password: SUPER_ADMIN_USER_PASSWORD,
+        },
+        shopAuthenticationStrategy: [new NativeAuthenticationStrategy()],
+        adminAuthenticationStrategy: [new NativeAuthenticationStrategy()],
+        customPermissions: [],
     },
-    adminApiPath: 'admin-api',
-    shopApiPath: 'shop-api',
+    catalogOptions: {
+        collectionFilters: defaultCollectionFilters,
+    },
     entityIdStrategy: new AutoIncrementIdStrategy(),
     assetOptions: {
         assetNamingStrategy: new DefaultAssetNamingStrategy(),
         assetStorageStrategy: new NoAssetStorageStrategy(),
         assetPreviewStrategy: new NoAssetPreviewStrategy(),
+        permittedFileTypes: ['image/*', 'video/*', 'audio/*', '.pdf'],
         uploadMaxFileSize: 20971520,
     },
     dbConnectionOptions: {
         timezone: 'Z',
         type: 'mysql',
-        logger: new TypeOrmLogger(),
     },
     promotionOptions: {
         promotionConditions: defaultPromotionConditions,
@@ -71,10 +104,12 @@ export const defaultConfig: RuntimeVendureConfig = {
     },
     orderOptions: {
         orderItemsLimit: 999,
+        priceCalculationStrategy: new DefaultPriceCalculationStrategy(),
         mergeStrategy: new MergeOrdersStrategy(),
         checkoutMergeStrategy: new UseGuestStrategy(),
-        process: {},
-        generateOrderCode: () => generatePublicId(),
+        process: [],
+        stockAllocationStrategy: new DefaultStockAllocationStrategy(),
+        orderCodeStrategy: new DefaultOrderCodeStrategy(),
     },
     paymentOptions: {
         paymentMethodHandlers: [],
@@ -103,6 +138,7 @@ export const defaultConfig: RuntimeVendureConfig = {
         Customer: [],
         Facet: [],
         FacetValue: [],
+        Fulfillment: [],
         GlobalSettings: [],
         Order: [],
         OrderLine: [],
@@ -111,8 +147,7 @@ export const defaultConfig: RuntimeVendureConfig = {
         ProductOptionGroup: [],
         ProductVariant: [],
         User: [],
+        ShippingMethod: [],
     },
-    middleware: [],
-    apolloServerPlugins: [],
     plugins: [],
 };

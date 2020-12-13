@@ -8,9 +8,9 @@ import {
     DefaultSearchPlugin,
     examplePaymentHandler,
     LogLevel,
+    PermissionDefinition,
     VendureConfig,
 } from '@vendure/core';
-import { ElasticsearchPlugin } from '@vendure/elasticsearch-plugin';
 import { defaultEmailHandlers, EmailPlugin } from '@vendure/email-plugin';
 import path from 'path';
 import { ConnectionOptions } from 'typeorm';
@@ -19,14 +19,30 @@ import { ConnectionOptions } from 'typeorm';
  * Config settings used during development
  */
 export const devConfig: VendureConfig = {
+    apiOptions: {
+        port: API_PORT,
+        adminApiPath: ADMIN_API_PATH,
+        adminApiPlayground: {
+            settings: {
+                'request.credentials': 'include',
+            } as any,
+        },
+        adminApiDebug: true,
+        shopApiPath: SHOP_API_PATH,
+        shopApiPlayground: {
+            settings: {
+                'request.credentials': 'include',
+            } as any,
+        },
+        shopApiDebug: true,
+    },
     authOptions: {
         disableAuth: false,
+        tokenMethod: 'cookie',
         sessionSecret: 'some-secret',
         requireVerification: true,
+        customPermissions: [],
     },
-    port: API_PORT,
-    adminApiPath: ADMIN_API_PATH,
-    shopApiPath: SHOP_API_PATH,
     dbConnectionOptions: {
         synchronize: false,
         logging: false,
@@ -36,12 +52,7 @@ export const devConfig: VendureConfig = {
     paymentOptions: {
         paymentMethodHandlers: [examplePaymentHandler],
     },
-    customFields: {
-        /*Product: [
-            { name: 'rating', type: 'float', readonly: true },
-            { name: 'markup', type: 'float', internal: true },
-        ],*/
-    },
+    customFields: {},
     logger: new DefaultLogger({ level: LogLevel.Info }),
     importExportOptions: {
         importAssetsDir: path.join(__dirname, 'import-assets'),
@@ -54,10 +65,10 @@ export const devConfig: VendureConfig = {
         }),
         DefaultSearchPlugin,
         DefaultJobQueuePlugin,
-        // ElasticsearchPlugin.init({
-        //     host: 'http://192.168.99.100',
-        //     port: 9200,
-        // }),
+        /*ElasticsearchPlugin.init({
+            host: 'http://localhost',
+            port: 9200,
+        }),*/
         EmailPlugin.init({
             devMode: true,
             handlers: defaultEmailHandlers,
@@ -86,15 +97,15 @@ function getDbConfig(): ConnectionOptions {
                 type: 'postgres',
                 host: '127.0.0.1',
                 port: 5432,
-                username: 'postgres',
-                password: 'Be70',
-                database: 'vendure',
+                username: 'admin',
+                password: 'secret',
+                database: 'vendure-dev',
             };
         case 'sqlite':
             console.log('Using sqlite connection');
             return {
                 synchronize: false,
-                type: 'sqlite',
+                type: 'better-sqlite3',
                 database: path.join(__dirname, 'vendure.sqlite'),
             };
         case 'sqljs':
@@ -110,8 +121,8 @@ function getDbConfig(): ConnectionOptions {
             console.log('Using mysql connection');
             return {
                 synchronize: true,
-                type: 'mysql',
-                host: '192.168.99.100',
+                type: 'mariadb',
+                host: '127.0.0.1',
                 port: 3306,
                 username: 'root',
                 password: '',

@@ -18,6 +18,8 @@ import { TestProcessContextPlugin } from './fixtures/test-plugins/with-worker-co
 describe('Plugins', () => {
     const bootstrapMockFn = jest.fn();
     const onConstructorFn = jest.fn();
+    const beforeBootstrapFn = jest.fn();
+    const beforeWorkerBootstrapFn = jest.fn();
     const onBootstrapFn = jest.fn();
     const onWorkerBootstrapFn = jest.fn();
     const onCloseFn = jest.fn();
@@ -28,6 +30,8 @@ describe('Plugins', () => {
         plugins: [
             TestPluginWithAllLifecycleHooks.init(
                 onConstructorFn,
+                beforeBootstrapFn,
+                beforeWorkerBootstrapFn,
                 onBootstrapFn,
                 onWorkerBootstrapFn,
                 onCloseFn,
@@ -57,6 +61,16 @@ describe('Plugins', () => {
 
     it('constructs one instance for each process', () => {
         expect(onConstructorFn).toHaveBeenCalledTimes(2);
+    });
+
+    it('calls beforeVendureBootstrap', () => {
+        expect(beforeBootstrapFn).toHaveBeenCalledTimes(1);
+        expect(beforeBootstrapFn).toHaveBeenCalledWith(server.app);
+    });
+
+    it('calls beforeVendureWorkerBootstrap', () => {
+        expect(beforeWorkerBootstrapFn).toHaveBeenCalledTimes(1);
+        expect(beforeWorkerBootstrapFn).toHaveBeenCalledWith(server.worker);
     });
 
     it('calls onVendureBootstrap', () => {
@@ -129,7 +143,7 @@ describe('Plugins', () => {
     });
 
     describe('REST plugins', () => {
-        const restControllerUrl = `http://localhost:${testConfig.port}/test`;
+        const restControllerUrl = `http://localhost:${testConfig.apiOptions.port}/test`;
 
         it('public route', async () => {
             const response = await shopClient.fetch(restControllerUrl + '/public');
@@ -164,7 +178,7 @@ describe('Plugins', () => {
     describe('processContext', () => {
         it('server context', async () => {
             const response = await shopClient.fetch(
-                `http://localhost:${testConfig.port}/process-context/server`,
+                `http://localhost:${testConfig.apiOptions.port}/process-context/server`,
             );
             const body = await response.text();
 
@@ -172,7 +186,7 @@ describe('Plugins', () => {
         });
         it('worker context', async () => {
             const response = await shopClient.fetch(
-                `http://localhost:${testConfig.port}/process-context/worker`,
+                `http://localhost:${testConfig.apiOptions.port}/process-context/worker`,
             );
             const body = await response.text();
 

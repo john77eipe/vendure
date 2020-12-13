@@ -1,5 +1,6 @@
 import { AssetType } from '@vendure/common/lib/generated-types';
 import { ID } from '@vendure/common/lib/shared-types';
+import { Observable } from 'rxjs';
 
 /**
  * Takes a predicate function and returns a negated version.
@@ -61,4 +62,16 @@ export function getAssetType(mimeType: string): AssetType {
  */
 export function normalizeEmailAddress(input: string): string {
     return input.trim().toLowerCase();
+}
+
+/**
+ * Converts a value that may be wrapped into a Promise or Observable into a Promise-wrapped
+ * value.
+ */
+export async function awaitPromiseOrObservable<T>(value: T | Promise<T> | Observable<T>): Promise<T> {
+    let result = await value;
+    if (result instanceof Observable) {
+        result = await result.toPromise();
+    }
+    return result;
 }

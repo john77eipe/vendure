@@ -3,7 +3,7 @@ import { assertNever } from '@vendure/common/lib/shared-utils';
 import { Column, ColumnOptions, ColumnType, ConnectionOptions } from 'typeorm';
 import { DateUtils } from 'typeorm/util/DateUtils';
 
-import { CustomFields } from '../config/custom-field/custom-field-types';
+import { CustomFieldConfig, CustomFields } from '../config/custom-field/custom-field-types';
 import { Logger } from '../config/logger/vendure-logger';
 import { VendureConfig } from '../config/vendure-config';
 
@@ -16,6 +16,7 @@ import {
     CustomFacetFieldsTranslation,
     CustomFacetValueFields,
     CustomFacetValueFieldsTranslation,
+    CustomFulfillmentFields,
     CustomGlobalSettingsFields,
     CustomOrderFields,
     CustomOrderLineFields,
@@ -27,6 +28,8 @@ import {
     CustomProductOptionGroupFieldsTranslation,
     CustomProductVariantFields,
     CustomProductVariantFieldsTranslation,
+    CustomShippingMethodFields,
+    CustomShippingMethodFieldsTranslation,
     CustomUserFields,
 } from './custom-entity-fields';
 
@@ -49,22 +52,19 @@ function registerCustomFieldsForEntity(
     const dbEngine = config.dbConnectionOptions.type;
     if (customFields) {
         for (const customField of customFields) {
-            const { name, type, defaultValue, nullable } = customField;
+            const { name, type, list, defaultValue, nullable } = customField;
             const registerColumn = () => {
                 const options: ColumnOptions = {
-                    type: getColumnType(dbEngine, type),
-                    default:
-                        type === 'datetime' ? formatDefaultDatetime(dbEngine, defaultValue) : defaultValue,
+                    type: list ? 'simple-json' : getColumnType(dbEngine, type),
+                    default: getDefault(customField, dbEngine),
                     name,
                     nullable: nullable === false ? false : true,
                 };
-                if (customField.type === 'string') {
+                if ((customField.type === 'string' || customField.type === 'localeString') && !list) {
                     const length = customField.length || 255;
                     if (MAX_STRING_LENGTH < length) {
                         throw new Error(
-                            `ERROR: The "length" property of the custom field "${
-                                customField.name
-                            }" is greater than the maximum allowed value of ${MAX_STRING_LENGTH}`,
+                            `ERROR: The "length" property of the custom field "${customField.name}" is greater than the maximum allowed value of ${MAX_STRING_LENGTH}`,
                         );
                     }
                     options.length = length;
@@ -75,7 +75,8 @@ function registerCustomFieldsForEntity(
                     // Setting precision on an sqlite datetime will cause
                     // spurious migration commands. See https://github.com/typeorm/typeorm/issues/2333
                     dbEngine !== 'sqljs' &&
-                    dbEngine !== 'sqlite'
+                    dbEngine !== 'sqlite' &&
+                    !list
                 ) {
                     options.precision = 6;
                 }
@@ -147,6 +148,22 @@ function getColumnType(dbEngine: ConnectionOptions['type'], type: CustomFieldTyp
     return 'varchar';
 }
 
+function getDefault(customField: CustomFieldConfig, dbEngine: ConnectionOptions['type']) {
+    const { name, type, list, defaultValue, nullable } = customField;
+    if (list && defaultValue) {
+        if (dbEngine === 'mysql') {
+            // MySQL does not support defaults on TEXT fields, which is what "simple-json" uses
+            // internally. See https://stackoverflow.com/q/3466872/772859
+            Logger.warn(
+                `MySQL does not support default values on list fields (${name}). No default will be set.`,
+            );
+            return undefined;
+        }
+        return JSON.stringify(defaultValue);
+    }
+    return type === 'datetime' ? formatDefaultDatetime(dbEngine, defaultValue) : defaultValue;
+}
+
 /**
  * Dynamically registers any custom fields with TypeORM. This function should be run at the bootstrap
  * stage of the app lifecycle, before the AppModule is initialized.
@@ -160,6 +177,7 @@ export function registerCustomEntityFields(config: VendureConfig) {
     registerCustomFieldsForEntity(config, 'Facet', CustomFacetFieldsTranslation, true);
     registerCustomFieldsForEntity(config, 'FacetValue', CustomFacetValueFields);
     registerCustomFieldsForEntity(config, 'FacetValue', CustomFacetValueFieldsTranslation, true);
+    registerCustomFieldsForEntity(config, 'Fulfillment', CustomFulfillmentFields);
     registerCustomFieldsForEntity(config, 'Order', CustomOrderFields);
     registerCustomFieldsForEntity(config, 'OrderLine', CustomOrderLineFields);
     registerCustomFieldsForEntity(config, 'Product', CustomProductFields);
@@ -177,4 +195,6 @@ export function registerCustomEntityFields(config: VendureConfig) {
     registerCustomFieldsForEntity(config, 'ProductVariant', CustomProductVariantFieldsTranslation, true);
     registerCustomFieldsForEntity(config, 'User', CustomUserFields);
     registerCustomFieldsForEntity(config, 'GlobalSettings', CustomGlobalSettingsFields);
+    registerCustomFieldsForEntity(config, 'ShippingMethod', CustomShippingMethodFields);
+    registerCustomFieldsForEntity(config, 'ShippingMethod', CustomShippingMethodFieldsTranslation, true);
 }

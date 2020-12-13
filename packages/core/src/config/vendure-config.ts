@@ -8,21 +8,30 @@ import { Observable } from 'rxjs';
 import { ConnectionOptions } from 'typeorm';
 
 import { RequestContext } from '../api/common/request-context';
-import { Transitions } from '../common/finite-state-machine';
+import { Transitions } from '../common/finite-state-machine/types';
+import { PermissionDefinition } from '../common/permission-definition';
 import { Order } from '../entity/order/order.entity';
 import { OrderState } from '../service/helpers/order-state-machine/order-state';
 
 import { AssetNamingStrategy } from './asset-naming-strategy/asset-naming-strategy';
 import { AssetPreviewStrategy } from './asset-preview-strategy/asset-preview-strategy';
 import { AssetStorageStrategy } from './asset-storage-strategy/asset-storage-strategy';
+import { AuthenticationStrategy } from './auth/authentication-strategy';
+import { CollectionFilter } from './collection/collection-filter';
 import { CustomFields } from './custom-field/custom-field-types';
 import { EntityIdStrategy } from './entity-id-strategy/entity-id-strategy';
+import { CustomFulfillmentProcess } from './fulfillment/custom-fulfillment-process';
 import { JobQueueStrategy } from './job-queue/job-queue-strategy';
 import { VendureLogger } from './logger/vendure-logger';
-import { OrderMergeStrategy } from './order-merge-strategy/order-merge-strategy';
+import { CustomOrderProcess } from './order/custom-order-process';
+import { OrderCodeStrategy } from './order/order-code-strategy';
+import { OrderMergeStrategy } from './order/order-merge-strategy';
+import { PriceCalculationStrategy } from './order/price-calculation-strategy';
+import { StockAllocationStrategy } from './order/stock-allocation-strategy';
 import { PaymentMethodHandler } from './payment-method/payment-method-handler';
 import { PromotionAction } from './promotion/promotion-action';
 import { PromotionCondition } from './promotion/promotion-condition';
+import { SessionCacheStrategy } from './session-cache/session-cache-strategy';
 import { ShippingCalculator } from './shipping-method/shipping-calculator';
 import { ShippingEligibilityChecker } from './shipping-method/shipping-eligibility-checker';
 import { TaxCalculationStrategy } from './tax/tax-calculation-strategy';
@@ -30,7 +39,195 @@ import { TaxZoneStrategy } from './tax/tax-zone-strategy';
 
 /**
  * @description
- * The AuthOptions define how authentication is managed.
+ * The ApiOptions define how the Vendure GraphQL APIs are exposed, as well as allowing the API layer
+ * to be extended with middleware.
+ *
+ * @docsCategory configuration
+ */
+export interface ApiOptions {
+    /**
+     * @description
+     * Set the hostname of the server. If not set, the server will be available on localhost.
+     *
+     * @default ''
+     */
+    hostname?: string;
+    /**
+     * @description
+     * Which port the Vendure server should listen on.
+     *
+     * @default 3000
+     */
+    port: number;
+    /**
+     * @description
+     * The path to the admin GraphQL API.
+     *
+     * @default 'admin-api'
+     */
+    adminApiPath?: string;
+    /**
+     * @description
+     * The path to the admin GraphQL API.
+     *
+     * @default 'shop-api'
+     */
+    shopApiPath?: string;
+    /**
+     * @description
+     * The playground config to the admin GraphQL API
+     * [ApolloServer playground](https://www.apollographql.com/docs/apollo-server/api/apollo-server/#constructoroptions-apolloserver).
+     *
+     * @default false
+     */
+    adminApiPlayground?: boolean | any;
+    /**
+     * @description
+     * The playground config to the shop GraphQL API
+     * [ApolloServer playground](https://www.apollographql.com/docs/apollo-server/api/apollo-server/#constructoroptions-apolloserver).
+     *
+     * @default false
+     */
+    shopApiPlayground?: boolean | any;
+    /**
+     * @description
+     * The debug config to the admin GraphQL API
+     * [ApolloServer playground](https://www.apollographql.com/docs/apollo-server/api/apollo-server/#constructoroptions-apolloserver).
+     *
+     * @default false
+     */
+    adminApiDebug?: boolean;
+    /**
+     * @description
+     * The debug config to the admin GraphQL API
+     * [ApolloServer playground](https://www.apollographql.com/docs/apollo-server/api/apollo-server/#constructoroptions-apolloserver).
+     *
+     * @default false
+     */
+    shopApiDebug?: boolean;
+    /**
+     * @description
+     * The name of the property which contains the token of the
+     * active channel. This property can be included either in
+     * the request header or as a query string.
+     *
+     * @default 'vendure-token'
+     */
+    channelTokenKey?: string;
+    /**
+     * @description
+     * Set the CORS handling for the server. See the [express CORS docs](https://github.com/expressjs/cors#configuration-options).
+     *
+     * @default { origin: true, credentials: true }
+     */
+    cors?: boolean | CorsOptions;
+    /**
+     * @description
+     * Custom Express middleware for the server.
+     *
+     * @default []
+     */
+    middleware?: Array<{ handler: RequestHandler; route: string }>;
+    /**
+     * @description
+     * Custom [ApolloServerPlugins](https://www.apollographql.com/docs/apollo-server/integrations/plugins/) which
+     * allow the extension of the Apollo Server, which is the underlying GraphQL server used by Vendure.
+     *
+     * Apollo plugins can be used e.g. to perform custom data transformations on incoming operations or outgoing
+     * data.
+     *
+     * @default []
+     */
+    apolloServerPlugins?: PluginDefinition[];
+}
+
+/**
+ * @description
+ * Options for the handling of the cookies used to track sessions (only applicable if
+ * `authOptions.tokenMethod` is set to `'cookie'`). These options are passed directly
+ * to the Express [cookie-session middleware](https://github.com/expressjs/cookie-session).
+ *
+ * @docsCategory auth
+ */
+export interface CookieOptions {
+    /**
+     * @description
+     * The name of the cookie to set.
+     *
+     * @default 'session'
+     */
+    name?: string;
+
+    /**
+     * @description
+     * A string which will be used as single key if keys is not provided.
+     *
+     * @default (random character string)
+     */
+    secret?: string;
+
+    /**
+     * @description
+     * a string indicating the path of the cookie.
+     *
+     * @default '/'
+     */
+    path?: string;
+
+    /**
+     * @description
+     * a string indicating the domain of the cookie (no default).
+     */
+    domain?: string;
+
+    /**
+     * @description
+     * a boolean or string indicating whether the cookie is a "same site" cookie (false by default). This can be set to 'strict',
+     * 'lax', 'none', or true (which maps to 'strict').
+     *
+     * @default false
+     */
+    sameSite?: 'strict' | 'lax' | 'none' | boolean;
+
+    /**
+     * @description
+     * a boolean indicating whether the cookie is only to be sent over HTTPS (false by default for HTTP, true by default for HTTPS).
+     */
+    secure?: boolean;
+
+    /**
+     * @description
+     * a boolean indicating whether the cookie is only to be sent over HTTPS (use this if you handle SSL not in your node process).
+     */
+    secureProxy?: boolean;
+
+    /**
+     * @description
+     * a boolean indicating whether the cookie is only to be sent over HTTP(S), and not made available to client JavaScript (true by default).
+     *
+     * @default true
+     */
+    httpOnly?: boolean;
+
+    /**
+     * @description
+     * a boolean indicating whether the cookie is to be signed (true by default). If this is true, another cookie of the same name with the .sig
+     * suffix appended will also be sent, with a 27-byte url-safe base64 SHA1 value representing the hash of cookie-name=cookie-value against the
+     * first Keygrip key. This signature key is used to detect tampering the next time a cookie is received.
+     */
+    signed?: boolean;
+
+    /**
+     * @description
+     * a boolean indicating whether to overwrite previously set cookies of the same name (true by default). If this is true, all cookies set during
+     * the same request with the same name (regardless of path or domain) are filtered out of the Set-Cookie header when setting this cookie.
+     */
+    overwrite?: boolean;
+}
+
+/**
+ * @description
+ * The AuthOptions define how authentication and authorization is managed.
  *
  * @docsCategory auth
  * */
@@ -63,6 +260,8 @@ export interface AuthOptions {
     tokenMethod?: 'cookie' | 'bearer';
     /**
      * @description
+     * **Deprecated** use `cookieConfig.secret` instead.
+     *
      * The secret used for signing the session cookies for authenticated users. Only applies when
      * tokenMethod is set to 'cookie'.
      *
@@ -71,8 +270,14 @@ export interface AuthOptions {
      * file not under source control, or from an environment variable, for example.
      *
      * @default 'session-secret'
+     * @deprecated use `cookieConfig.secret` instead
      */
     sessionSecret?: string;
+    /**
+     * @description
+     * Options related to the handling of cookies when using the 'cookie' tokenMethod.
+     */
+    cookieOptions?: CookieOptions;
     /**
      * @description
      * Sets the header property which will be used to send the auth token when using the 'bearer' method.
@@ -82,15 +287,33 @@ export interface AuthOptions {
     authTokenHeaderKey?: string;
     /**
      * @description
-     * Session duration, i.e. the time which must elapse from the last authenticted request
+     * Session duration, i.e. the time which must elapse from the last authenticated request
      * after which the user must re-authenticate.
      *
      * Expressed as a string describing a time span per
      * [zeit/ms](https://github.com/zeit/ms.js).  Eg: `60`, `'2 days'`, `'10h'`, `'7d'`
      *
-     * @default '7d'
+     * @default '1y'
      */
     sessionDuration?: string | number;
+    /**
+     * @description
+     * This strategy defines how sessions will be cached. By default, sessions are cached using a simple
+     * in-memory caching strategy which is suitable for development and low-traffic, single-instance
+     * deployments.
+     *
+     * @default InMemorySessionCacheStrategy
+     */
+    sessionCacheStrategy?: SessionCacheStrategy;
+    /**
+     * @description
+     * The "time to live" of a given item in the session cache. This determines the length of time (in seconds)
+     * that a cache entry is kept before being considered "stale" and being replaced with fresh data
+     * taken from the database.
+     *
+     * @default 300
+     */
+    sessionCacheTTL?: number;
     /**
      * @description
      * Determines whether new User accounts require verification of their email address.
@@ -112,6 +335,33 @@ export interface AuthOptions {
      * @default '7d'
      */
     verificationTokenDuration?: string | number;
+    /**
+     * @description
+     * Configures the credentials to be used to create a superadmin
+     */
+    superadminCredentials?: SuperadminCredentials;
+    /**
+     * @description
+     * Configures one or more AuthenticationStrategies which defines how authentication
+     * is handled in the Shop API.
+     * @default NativeAuthenticationStrategy
+     */
+    shopAuthenticationStrategy?: AuthenticationStrategy[];
+    /**
+     * @description
+     * Configures one or more AuthenticationStrategy which defines how authentication
+     * is handled in the Admin API.
+     * @default NativeAuthenticationStrategy
+     */
+    adminAuthenticationStrategy?: AuthenticationStrategy[];
+    /**
+     * @description
+     * Allows custom Permissions to be defined, which can be used to restrict access to custom
+     * GraphQL resolvers defined in plugins.
+     *
+     * @default []
+     */
+    customPermissions?: PermissionDefinition[];
 }
 
 /**
@@ -135,9 +385,27 @@ export interface OrderOptions {
     orderItemsLimit?: number;
     /**
      * @description
-     * Defines custom states and transition logic for the order process state machine.
+     * Defines the logic used to calculate the unit price of an OrderItem when adding an
+     * item to an Order.
+     *
+     * @default DefaultPriceCalculationStrategy
      */
-    process?: OrderProcessOptions<string>;
+    priceCalculationStrategy?: PriceCalculationStrategy;
+    /**
+     * @description
+     * Allows the definition of custom states and transition logic for the order process state machine.
+     * Takes an array of objects implementing the {@link CustomOrderProcess} interface.
+     *
+     * @default []
+     */
+    process?: Array<CustomOrderProcess<any>>;
+    /**
+     * @description
+     * Determines the point of the order process at which stock gets allocated.
+     *
+     * @default DefaultStockAllocationStrategy
+     */
+    stockAllocationStrategy: StockAllocationStrategy;
     /**
      * @description
      * Defines the strategy used to merge a guest Order and an existing Order when
@@ -163,45 +431,10 @@ export interface OrderOptions {
      * Note: when using a custom function for Order codes, bear in mind the database limit
      * for string types (e.g. 255 chars for a varchar field in MySQL), and also the need
      * for codes to be unique.
-     */
-    generateOrderCode?: (ctx: RequestContext) => string | Promise<string>;
-}
-
-/**
- * @description
- * Defines custom states and transition logic for the order process state machine.
- *
- * @docsCategory orders
- * @docsPage OrderOptions
- */
-export interface OrderProcessOptions<T extends string> {
-    /**
-     * @description
-     * Define how the custom states fit in with the default order
-     * state transitions.
      *
+     * @default DefaultOrderCodeStrategy
      */
-    transtitions?: Partial<Transitions<T | OrderState>>;
-    /**
-     * @description
-     * Define logic to run before a state tranition takes place. Returning
-     * false will prevent the transition from going ahead.
-     */
-    onTransitionStart?(
-        fromState: T,
-        toState: T,
-        data: { order: Order },
-    ): boolean | Promise<boolean> | Observable<boolean> | void;
-    /**
-     * @description
-     * Define logic to run after a state transition has taken place.
-     */
-    onTransitionEnd?(fromState: T, toState: T, data: { order: Order }): void;
-    /**
-     * @description
-     * Define a custom error handler function for transition errors.
-     */
-    onTransitionError?(fromState: T, toState: T, message?: string): void;
+    orderCodeStrategy?: OrderCodeStrategy;
 }
 
 /**
@@ -219,21 +452,31 @@ export interface AssetOptions {
      *
      * @default DefaultAssetNamingStrategy
      */
-    assetNamingStrategy: AssetNamingStrategy;
+    assetNamingStrategy?: AssetNamingStrategy;
     /**
      * @description
      * Defines the strategy used for storing uploaded binary files.
      *
      * @default NoAssetStorageStrategy
      */
-    assetStorageStrategy: AssetStorageStrategy;
+    assetStorageStrategy?: AssetStorageStrategy;
     /**
      * @description
      * Defines the strategy used for creating preview images of uploaded assets.
      *
      * @default NoAssetPreviewStrategy
      */
-    assetPreviewStrategy: AssetPreviewStrategy;
+    assetPreviewStrategy?: AssetPreviewStrategy;
+    /**
+     * @description
+     * An array of the permitted file types that may be uploaded as Assets. Each entry
+     * should be in the form of a valid
+     * [unique file type specifier](https://developer.mozilla.org/en-US/docs/Web/HTML/Element/input/file#Unique_file_type_specifiers)
+     * i.e. either a file extension (".pdf") or a mime type ("image/*", "audio/mpeg" etc.).
+     *
+     * @default image, audio, video MIME types plus PDFs
+     */
+    permittedFileTypes?: string[];
     /**
      * @description
      * The max file size in bytes for uploaded assets.
@@ -244,9 +487,24 @@ export interface AssetOptions {
 }
 
 /**
- * @docsCategory promotions
+ * @description
+ * Options related to products and collections.
  *
- * */
+ * @docsCategory configuration
+ */
+export interface CatalogOptions {
+    /**
+     * @description
+     * Allows custom {@link CollectionFilter}s to be defined.
+     *
+     * @default defaultCollectionFilters
+     */
+    collectionFilters: Array<CollectionFilter<any>>;
+}
+
+/**
+ * @docsCategory promotions
+ */
 export interface PromotionOptions {
     /**
      * @description
@@ -274,6 +532,36 @@ export interface ShippingOptions {
      * An array of available ShippingCalculators for use in configuring ShippingMethods
      */
     shippingCalculators?: Array<ShippingCalculator<any>>;
+
+    /**
+     * @description
+     * Allows the definition of custom states and transition logic for the fulfillment process state machine.
+     * Takes an array of objects implementing the {@link CustomFulfillmentProcess} interface.
+     */
+    customFulfillmentProcess?: Array<CustomFulfillmentProcess<any>>;
+}
+
+/**
+ * @description
+ * These credentials will be used to create the Superadmin user & administrator
+ * when Vendure first bootstraps.
+ *
+ * @docsCategory auth
+ */
+export interface SuperadminCredentials {
+    /**
+     * @description
+     * The identifier to be used to create a superadmin account
+     * @default 'superadmin'
+     */
+    identifier: string;
+
+    /**
+     * @description
+     * The password to be used to create a superadmin account
+     * @default 'superadmin'
+     */
+    password: string;
 }
 
 /**
@@ -287,7 +575,7 @@ export interface PaymentOptions {
      * @description
      * An array of {@link PaymentMethodHandler}s with which to process payments.
      */
-    paymentMethodHandlers: Array<PaymentMethodHandler<any>>;
+    paymentMethodHandlers: PaymentMethodHandler[];
 }
 
 /**
@@ -384,6 +672,8 @@ export interface WorkerOptions {
 /**
  * @description
  * Options related to the built-in job queue.
+ *
+ * @docsCategory JobQueue
  */
 export interface JobQueueOptions {
     /**
@@ -395,10 +685,10 @@ export interface JobQueueOptions {
     jobQueueStrategy?: JobQueueStrategy;
     /**
      * @description
-     * Defines the interval in ms used by the JobService to poll for new
+     * Defines the interval in ms used by the {@link JobQueueService} to poll for new
      * jobs in the queue to process.
      *
-     * @default 100
+     * @default 200
      */
     pollInterval?: number;
 }
@@ -413,18 +703,10 @@ export interface JobQueueOptions {
 export interface VendureConfig {
     /**
      * @description
-     * The path to the admin GraphQL API.
-     *
-     * @default 'admin-api'
+     * Configuration for the GraphQL APIs, including hostname, port, CORS settings,
+     * middleware etc.
      */
-    adminApiPath?: string;
-    /**
-     * @description
-     * The path to the admin GraphQL API.
-     *
-     * @default 'shop-api'
-     */
-    shopApiPath?: string;
+    apiOptions: ApiOptions;
     /**
      * @description
      * Configuration for the handling of Assets.
@@ -437,20 +719,9 @@ export interface VendureConfig {
     authOptions: AuthOptions;
     /**
      * @description
-     * The name of the property which contains the token of the
-     * active channel. This property can be included either in
-     * the request header or as a query string.
-     *
-     * @default 'vendure-token'
+     * Configuration for Products and Collections.
      */
-    channelTokenKey?: string;
-    /**
-     * @description
-     * Set the CORS handling for the server. See the [express CORS docs](https://github.com/expressjs/cors#configuration-options).
-     *
-     * @default { origin: true, credentials: true }
-     */
-    cors?: boolean | CorsOptions;
+    catalogOptions?: CatalogOptions;
     /**
      * @description
      * Defines custom fields which can be used to extend the built-in entities.
@@ -461,6 +732,8 @@ export interface VendureConfig {
     /**
      * @description
      * The connection options used by TypeORM to connect to the database.
+     * See the [TypeORM documentation](https://typeorm.io/#/connection-options) for a
+     * full description of all available options.
      */
     dbConnectionOptions: ConnectionOptions;
     /**
@@ -485,16 +758,9 @@ export interface VendureConfig {
      * entities via the API. The default uses a simple auto-increment integer
      * strategy.
      *
-     * @default new AutoIncrementIdStrategy()
+     * @default AutoIncrementIdStrategy
      */
     entityIdStrategy?: EntityIdStrategy<any>;
-    /**
-     * @description
-     * Set the hostname of the server. If not set, the server will be available on localhost.
-     *
-     * @default ''
-     */
-    hostname?: string;
     /**
      * @description
      * Configuration settings for data import and export.
@@ -505,24 +771,6 @@ export interface VendureConfig {
      * Configuration settings governing how orders are handled.
      */
     orderOptions?: OrderOptions;
-    /**
-     * @description
-     * Custom Express middleware for the server.
-     *
-     * @default []
-     */
-    middleware?: Array<{ handler: RequestHandler; route: string }>;
-    /**
-     * @description
-     * Custom [ApolloServerPlugins](https://www.apollographql.com/docs/apollo-server/integrations/plugins/) which
-     * allow the extension of the Apollo Server, which is the underlying GraphQL server used by Vendure.
-     *
-     * Apollo plugins can be used e.g. to perform custom data transformations on incoming operations or outgoing
-     * data.
-     *
-     * @default []
-     */
-    apolloServerPlugins?: PluginDefinition[];
     /**
      * @description
      * Configures available payment processing methods.
@@ -537,13 +785,6 @@ export interface VendureConfig {
     plugins?: Array<DynamicModule | Type<any>>;
     /**
      * @description
-     * Which port the Vendure server should listen on.
-     *
-     * @default 3000
-     */
-    port: number;
-    /**
-     * @description
      * Configures the Conditions and Actions available when creating Promotions.
      */
     promotionOptions?: PromotionOptions;
@@ -555,6 +796,8 @@ export interface VendureConfig {
     /**
      * @description
      * Provide a logging service which implements the {@link VendureLogger} interface.
+     * Note that the logging of SQL queries is controlled separately by the
+     * `dbConnectionOptions.logging` property.
      *
      * @default DefaultLogger
      */
@@ -584,6 +827,7 @@ export interface VendureConfig {
  * @docsCategory configuration
  */
 export interface RuntimeVendureConfig extends Required<VendureConfig> {
+    apiOptions: Required<ApiOptions>;
     assetOptions: Required<AssetOptions>;
     authOptions: Required<AuthOptions>;
     customFields: Required<CustomFields>;

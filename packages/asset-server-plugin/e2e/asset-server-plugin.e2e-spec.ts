@@ -1,3 +1,4 @@
+/* tslint:disable:no-non-null-assertion */
 import { DefaultLogger, LogLevel, mergeConfig } from '@vendure/core';
 import { createTestEnvironment } from '@vendure/testing';
 import fs from 'fs-extra';
@@ -9,7 +10,7 @@ import { initialData } from '../../../e2e-common/e2e-initial-data';
 import { TEST_SETUP_TIMEOUT_MS, testConfig } from '../../../e2e-common/test-config';
 import { AssetServerPlugin } from '../src/plugin';
 
-import { CreateAssets } from './graphql/generated-e2e-asset-server-plugin-types';
+import { CreateAssets, DeleteAsset, DeletionResult } from './graphql/generated-e2e-asset-server-plugin-types';
 
 const TEST_ASSET_DIR = 'test-assets';
 const IMAGE_BASENAME = 'derick-david-409858-unsplash';
@@ -21,7 +22,9 @@ describe('AssetServerPlugin', () => {
 
     const { server, adminClient, shopClient } = createTestEnvironment(
         mergeConfig(testConfig, {
-            port: 5050,
+            apiOptions: {
+                port: 5050,
+            },
             workerOptions: {
                 options: {
                     port: 5055,
@@ -163,19 +166,97 @@ describe('AssetServerPlugin', () => {
             return fetch(`${asset.preview}?h=10.5`);
         });
     });
+
+    describe('deletion', () => {
+        it('deleting Asset deletes binary file', async () => {
+            const { deleteAsset } = await adminClient.query<DeleteAsset.Mutation, DeleteAsset.Variables>(
+                DELETE_ASSET,
+                {
+                    id: asset.id,
+                    force: true,
+                },
+            );
+
+            expect(deleteAsset.result).toBe(DeletionResult.DELETED);
+
+            expect(fs.existsSync(sourceFilePath)).toBe(false);
+            expect(fs.existsSync(previewFilePath)).toBe(false);
+        });
+    });
+
+    describe('MIME type detection', () => {
+        let testImages: CreateAssets.CreateAssets[] = [];
+
+        async function testMimeTypeOfAssetWithExt(ext: string, expectedMimeType: string) {
+            const testImage = testImages.find(i => i.source.endsWith(ext))!;
+            const result = await fetch(testImage.source);
+            const contentType = result.headers.get('Content-Type');
+
+            expect(contentType).toBe(expectedMimeType);
+        }
+
+        beforeAll(async () => {
+            const formats = ['gif', 'jpg', 'png', 'svg', 'tiff', 'webp'];
+
+            const filesToUpload = formats.map(ext => path.join(__dirname, `fixtures/assets/test.${ext}`));
+            const { createAssets }: CreateAssets.Mutation = await adminClient.fileUploadMutation({
+                mutation: CREATE_ASSETS,
+                filePaths: filesToUpload,
+                mapVariables: filePaths => ({
+                    input: filePaths.map(p => ({ file: null })),
+                }),
+            });
+
+            testImages = createAssets;
+        });
+
+        it('gif', async () => {
+            await testMimeTypeOfAssetWithExt('gif', 'image/gif');
+        });
+
+        it('jpg', async () => {
+            await testMimeTypeOfAssetWithExt('jpg', 'image/jpeg');
+        });
+
+        it('png', async () => {
+            await testMimeTypeOfAssetWithExt('png', 'image/png');
+        });
+
+        it('svg', async () => {
+            await testMimeTypeOfAssetWithExt('svg', 'image/svg+xml');
+        });
+
+        it('tiff', async () => {
+            await testMimeTypeOfAssetWithExt('tiff', 'image/tiff');
+        });
+
+        it('webp', async () => {
+            await testMimeTypeOfAssetWithExt('webp', 'image/webp');
+        });
+    });
 });
 
 export const CREATE_ASSETS = gql`
     mutation CreateAssets($input: [CreateAssetInput!]!) {
         createAssets(input: $input) {
-            id
-            name
-            source
-            preview
-            focalPoint {
-                x
-                y
+            ... on Asset {
+                id
+                name
+                source
+                preview
+                focalPoint {
+                    x
+                    y
+                }
             }
+        }
+    }
+`;
+
+export const DELETE_ASSET = gql`
+    mutation DeleteAsset($id: ID!, $force: Boolean!) {
+        deleteAsset(id: $id, force: $force) {
+            result
         }
     }
 `;

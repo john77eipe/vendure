@@ -1,6 +1,5 @@
 import { Omit } from '@vendure/common/lib/omit';
-import { RequestContext, Type, VendureEvent, WorkerMessage } from '@vendure/core';
-import { Connection } from 'typeorm';
+import { Injector, RequestContext, VendureEvent, WorkerMessage } from '@vendure/core';
 
 import { EmailEventHandler } from './event-handler';
 
@@ -164,6 +163,28 @@ export interface SMTPTransportOptions {
      * Defines preferred authentication method, e.g. ‘PLAIN’
      */
     authMethod?: string;
+    /**
+     * @description
+     * If true, uses the configured {@link VendureLogger} to log messages from Nodemailer as it interacts with
+     * the SMTP server.
+     *
+     * @default false
+     */
+    logging?: boolean;
+    /**
+     * @description
+     * If set to true, then logs SMTP traffic without message content.
+     *
+     * @default false
+     */
+    transactionLog?: boolean;
+    /**
+     * @description
+     * If set to true, then logs SMTP traffic and message content, otherwise logs only transaction events.
+     *
+     * @default false
+     */
+    debug?: boolean;
 }
 
 /**
@@ -244,7 +265,7 @@ export interface TestingTransportOptions {
 export interface EmailGenerator<T extends string = any, E extends VendureEvent = any> {
     /**
      * @description
-     * Any neccesary setup can be performed here.
+     * Any necessary setup can be performed here.
      */
     onInit?(options: EmailPluginOptions): void | Promise<void>;
 
@@ -269,8 +290,7 @@ export interface EmailGenerator<T extends string = any, E extends VendureEvent =
  */
 export type LoadDataFn<Event extends EventWithContext, R> = (context: {
     event: Event;
-    connection: Connection;
-    inject: <T>(type: Type<T>) => T;
+    injector: Injector;
 }) => Promise<R>;
 
 export type IntermediateEmailDetails = {

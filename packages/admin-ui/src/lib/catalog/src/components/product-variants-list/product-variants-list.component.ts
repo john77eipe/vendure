@@ -10,21 +10,27 @@ import {
     Output,
     SimpleChanges,
 } from '@angular/core';
-import { FormArray } from '@angular/forms';
-import { notNullOrUndefined } from '@vendure/common/lib/shared-utils';
-import { Subscription } from 'rxjs';
-
+import { FormArray, FormGroup } from '@angular/forms';
 import {
     CustomFieldConfig,
+    DataService,
     FacetValue,
     FacetWithValues,
+    flattenFacetValues,
+    GlobalFlag,
+    LanguageCode,
+    ModalService,
+    ProductOptionFragment,
     ProductVariant,
     ProductWithVariants,
     TaxCategory,
     UpdateProductOptionInput,
 } from '@vendure/admin-ui/core';
-import { flattenFacetValues } from '@vendure/admin-ui/core';
-import { ModalService } from '@vendure/admin-ui/core';
+import { notNullOrUndefined } from '@vendure/common/lib/shared-utils';
+import { PaginationInstance } from 'ngx-pagination';
+import { Subscription } from 'rxjs';
+import { debounceTime, distinctUntilChanged, map } from 'rxjs/operators';
+
 import { AssetChange } from '../product-assets/product-assets.component';
 import { VariantFormValue } from '../product-detail/product-detail.component';
 import { UpdateProductOptionDialogComponent } from '../update-product-option-dialog/update-product-option-dialog.component';
@@ -46,41 +52,96 @@ export class ProductVariantsListComponent implements OnChanges, OnInit, OnDestro
     @Input() facets: FacetWithValues.Fragment[];
     @Input() optionGroups: ProductWithVariants.OptionGroups[];
     @Input() customFields: CustomFieldConfig[];
+    @Input() customOptionFields: CustomFieldConfig[];
+    @Input() activeLanguage: LanguageCode;
     @Output() assetChange = new EventEmitter<VariantAssetChange>();
     @Output() selectionChange = new EventEmitter<string[]>();
     @Output() selectFacetValueClick = new EventEmitter<string[]>();
     @Output() updateProductOption = new EventEmitter<UpdateProductOptionInput>();
     selectedVariantIds: string[] = [];
+    pagination: PaginationInstance = {
+        currentPage: 1,
+        itemsPerPage: 10,
+    };
+    formGroupMap = new Map<string, FormGroup>();
+    GlobalFlag = GlobalFlag;
+    globalTrackInventory: boolean;
+    globalOutOfStockThreshold: number;
     private facetValues: FacetValue.Fragment[];
-    private formSubscription: Subscription;
+    private subscription: Subscription;
 
-    constructor(private changeDetector: ChangeDetectorRef, private modalService: ModalService) {}
+    constructor(
+        private changeDetector: ChangeDetectorRef,
+        private modalService: ModalService,
+        private dataService: DataService,
+    ) {}
 
     ngOnInit() {
-        this.formSubscription = this.formArray.valueChanges.subscribe(() =>
-            this.changeDetector.markForCheck(),
+        this.dataService.settings.getGlobalSettings('cache-first').single$.subscribe(({ globalSettings }) => {
+            this.globalTrackInventory = globalSettings.trackInventory;
+            this.globalOutOfStockThreshold = globalSettings.outOfStockThreshold;
+            this.changeDetector.markForCheck();
+        });
+        this.subscription = this.formArray.valueChanges.subscribe(() => this.changeDetector.markForCheck());
+
+        this.subscription.add(
+            this.formArray.valueChanges
+                .pipe(
+                    map(value => value.length),
+                    debounceTime(1),
+                    distinctUntilChanged(),
+                )
+                .subscribe(() => {
+                    this.buildFormGroupMap();
+                }),
         );
+
+        this.buildFormGroupMap();
     }
 
     ngOnChanges(changes: SimpleChanges) {
         if ('facets' in changes && !!changes['facets'].currentValue) {
             this.facetValues = flattenFacetValues(this.facets);
         }
-    }
-
-    ngOnDestroy() {
-        if (this.formSubscription) {
-            this.formSubscription.unsubscribe();
+        if ('variants' in changes) {
+            if (changes['variants'].currentValue?.length !== changes['variants'].previousValue?.length) {
+                this.pagination.currentPage = 1;
+            }
         }
     }
 
-    getTaxCategoryName(index: number): string {
-        const control = this.formArray.at(index).get(['taxCategoryId']);
+    ngOnDestroy() {
+        if (this.subscription) {
+            this.subscription.unsubscribe();
+        }
+    }
+
+    trackById(index: number, item: ProductWithVariants.Variants) {
+        return item.id;
+    }
+
+    inventoryIsNotTracked(formGroup: FormGroup): boolean {
+        const trackInventory = formGroup.get('trackInventory')?.value;
+        return (
+            trackInventory === GlobalFlag.FALSE ||
+            (trackInventory === GlobalFlag.INHERIT && this.globalTrackInventory === false)
+        );
+    }
+
+    getTaxCategoryName(group: FormGroup): string {
+        const control = group.get(['taxCategoryId']);
         if (control && this.taxCategories) {
             const match = this.taxCategories.find(t => t.id === control.value);
             return match ? match.name : '';
         }
         return '';
+    }
+
+    getSaleableStockLevel(variant: ProductWithVariants.Variants) {
+        const effectiveOutOfStockThreshold = variant.useGlobalOutOfStockThreshold
+            ? this.globalOutOfStockThreshold
+            : variant.outOfStockThreshold;
+        return variant.stockOnHand - variant.stockAllocated - effectiveOutOfStockThreshold;
     }
 
     areAllSelected(): boolean {
@@ -117,13 +178,24 @@ export class ProductVariantsListComponent implements OnChanges, OnInit, OnDestro
 
     optionGroupName(optionGroupId: string): string | undefined {
         const group = this.optionGroups.find(g => g.id === optionGroupId);
-        return group && group.name;
+        if (group) {
+            const translation =
+                group?.translations.find(t => t.languageCode === this.activeLanguage) ??
+                group.translations[0];
+            return translation.name;
+        }
     }
 
-    pendingFacetValues(index: number) {
+    optionName(option: ProductOptionFragment) {
+        const translation =
+            option.translations.find(t => t.languageCode === this.activeLanguage) ?? option.translations[0];
+        return translation.name;
+    }
+
+    pendingFacetValues(variant: ProductWithVariants.Variants) {
         if (this.facets) {
-            const formFacetValueIds = this.getFacetValueIds(index);
-            const variantFacetValueIds = this.variants[index].facetValues.map(fv => fv.id);
+            const formFacetValueIds = this.getFacetValueIds(variant.id);
+            const variantFacetValueIds = variant.facetValues.map(fv => fv.id);
             return formFacetValueIds
                 .filter(x => !variantFacetValueIds.includes(x))
                 .map(id => this.facetValues.find(fv => fv.id === id))
@@ -133,9 +205,8 @@ export class ProductVariantsListComponent implements OnChanges, OnInit, OnDestro
         }
     }
 
-    existingFacetValues(index: number) {
-        const variant = this.variants[index];
-        const formFacetValueIds = this.getFacetValueIds(index);
+    existingFacetValues(variant: ProductWithVariants.Variants) {
+        const formFacetValueIds = this.getFacetValueIds(variant.id);
         const intersection = [...formFacetValueIds].filter(x =>
             variant.facetValues.map(fv => fv.id).includes(x),
         );
@@ -144,23 +215,21 @@ export class ProductVariantsListComponent implements OnChanges, OnInit, OnDestro
             .filter(notNullOrUndefined);
     }
 
-    removeFacetValue(index: number, facetValueId: string) {
-        const formGroup = this.formArray.at(index);
-        const newValue = (formGroup.value as VariantFormValue).facetValueIds.filter(
-            id => id !== facetValueId,
-        );
-        formGroup.patchValue({
-            facetValueIds: newValue,
-        });
-        formGroup.markAsDirty();
+    removeFacetValue(variant: ProductWithVariants.Variants, facetValueId: string) {
+        const formGroup = this.formGroupMap.get(variant.id);
+        if (formGroup) {
+            const newValue = (formGroup.value as VariantFormValue).facetValueIds.filter(
+                id => id !== facetValueId,
+            );
+            formGroup.patchValue({
+                facetValueIds: newValue,
+            });
+            formGroup.markAsDirty();
+        }
     }
 
     isVariantSelected(variantId: string): boolean {
         return -1 < this.selectedVariantIds.indexOf(variantId);
-    }
-
-    customFieldIsSet(index: number, name: string): boolean {
-        return !!this.formArray.at(index).get(['customFields', name]);
     }
 
     editOption(option: ProductVariant.Options) {
@@ -169,6 +238,8 @@ export class ProductVariantsListComponent implements OnChanges, OnInit, OnDestro
                 size: 'md',
                 locals: {
                     productOption: option,
+                    activeLanguage: this.activeLanguage,
+                    customFields: this.customOptionFields,
                 },
             })
             .subscribe(result => {
@@ -178,8 +249,16 @@ export class ProductVariantsListComponent implements OnChanges, OnInit, OnDestro
             });
     }
 
-    private getFacetValueIds(index: number): string[] {
-        const formValue: VariantFormValue = this.formArray.at(index).value;
+    private buildFormGroupMap() {
+        this.formGroupMap.clear();
+        for (const controlGroup of this.formArray.controls) {
+            this.formGroupMap.set(controlGroup.value.id, controlGroup as FormGroup);
+        }
+        this.changeDetector.markForCheck();
+    }
+
+    private getFacetValueIds(id: string): string[] {
+        const formValue: VariantFormValue = this.formGroupMap.get(id)?.value;
         return formValue.facetValueIds;
     }
 }

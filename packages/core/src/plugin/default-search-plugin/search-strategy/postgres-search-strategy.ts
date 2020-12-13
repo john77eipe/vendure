@@ -1,12 +1,13 @@
-import { SearchInput, SearchResult } from '@vendure/common/lib/generated-types';
+import { LogicalOperator, SearchInput, SearchResult } from '@vendure/common/lib/generated-types';
 import { ID } from '@vendure/common/lib/shared-types';
-import { unique } from '@vendure/common/lib/unique';
-import { Brackets, Connection, SelectQueryBuilder } from 'typeorm';
+import { Brackets, SelectQueryBuilder } from 'typeorm';
 
 import { RequestContext } from '../../../api/common/request-context';
+import { TransactionalConnection } from '../../../service/transaction/transactional-connection';
 import { SearchIndexItem } from '../search-index-item.entity';
 
 import { SearchStrategy } from './search-strategy';
+import { fieldsToSelect } from './search-strategy-common';
 import { createFacetIdCountMap, mapToSearchResult } from './search-strategy-utils';
 
 /**
@@ -15,7 +16,7 @@ import { createFacetIdCountMap, mapToSearchResult } from './search-strategy-util
 export class PostgresSearchStrategy implements SearchStrategy {
     private readonly minTermLength = 2;
 
-    constructor(private connection: Connection) {}
+    constructor(private connection: TransactionalConnection) {}
 
     async getFacetValueIds(
         ctx: RequestContext,
@@ -96,7 +97,7 @@ export class PostgresSearchStrategy implements SearchStrategy {
         if (enabledOnly) {
             innerQb.andWhere('"si"."enabled" = :enabled', { enabled: true });
         }
-        const totalItemsQb = this.connection
+        const totalItemsQb = this.connection.rawConnection
             .createQueryBuilder()
             .select('COUNT(*) as total')
             .from(`(${innerQb.getQuery()})`, 'inner')
@@ -110,7 +111,7 @@ export class PostgresSearchStrategy implements SearchStrategy {
         input: SearchInput,
         forceGroup: boolean = false,
     ): SelectQueryBuilder<SearchIndexItem> {
-        const { term, facetValueIds, collectionId } = input;
+        const { term, facetValueIds, facetValueOperator, collectionId, collectionSlug } = input;
         // join multiple words with the logical AND operator
         const termLogicalAnd = term ? term.trim().replace(/\s+/, ' & ') : '';
 
@@ -139,16 +140,29 @@ export class PostgresSearchStrategy implements SearchStrategy {
                 )
                 .setParameters({ term: termLogicalAnd });
         }
-        if (facetValueIds) {
-            for (const id of facetValueIds) {
-                const placeholder = '_' + id;
-                qb.andWhere(`:${placeholder} = ANY (string_to_array(si.facetValueIds, ','))`, {
-                    [placeholder]: id,
-                });
-            }
+        if (facetValueIds?.length) {
+            qb.andWhere(
+                new Brackets(qb1 => {
+                    for (const id of facetValueIds) {
+                        const placeholder = '_' + id;
+                        const clause = `:${placeholder} = ANY (string_to_array(si.facetValueIds, ','))`;
+                        const params = { [placeholder]: id };
+                        if (facetValueOperator === LogicalOperator.AND) {
+                            qb1.andWhere(clause, params);
+                        } else {
+                            qb1.orWhere(clause, params);
+                        }
+                    }
+                }),
+            );
         }
         if (collectionId) {
             qb.andWhere(`:collectionId = ANY (string_to_array(si.collectionIds, ','))`, { collectionId });
+        }
+        if (collectionSlug) {
+            qb.andWhere(`:collectionSlug = ANY (string_to_array(si.collectionSlugs, ','))`, {
+                collectionSlug,
+            });
         }
         qb.andWhere('si.languageCode = :languageCode', { languageCode: ctx.languageCode });
         qb.andWhere('si.channelId = :channelId', { channelId: ctx.channelId });
@@ -164,29 +178,7 @@ export class PostgresSearchStrategy implements SearchStrategy {
      * "MIN" function in this case to all other columns than the productId.
      */
     private createPostgresSelect(groupByProduct: boolean): string {
-        return [
-            'sku',
-            'enabled',
-            'slug',
-            'price',
-            'priceWithTax',
-            'productVariantId',
-            'languageCode',
-            'productId',
-            'productName',
-            'productVariantName',
-            'description',
-            'facetIds',
-            'facetValueIds',
-            'collectionIds',
-            'channelIds',
-            'productAssetId',
-            'productPreview',
-            'productPreviewFocalPoint',
-            'productVariantAssetId',
-            'productVariantPreview',
-            'productVariantPreviewFocalPoint',
-        ]
+        return fieldsToSelect
             .map(col => {
                 const qualifiedName = `si.${col}`;
                 const alias = `si_${col}`;

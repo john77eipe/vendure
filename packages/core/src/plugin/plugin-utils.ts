@@ -1,7 +1,7 @@
 import { RequestHandler } from 'express';
 import { createProxyMiddleware } from 'http-proxy-middleware';
 
-import { Logger, VendureConfig } from '../config';
+import { Logger, RuntimeVendureConfig, VendureConfig } from '../config';
 
 /**
  * @description
@@ -16,8 +16,8 @@ import { Logger, VendureConfig } from '../config';
  * // running some service which we want to access via the `/my-plugin/`
  * // route of the main Vendure server.
  * \@VendurePlugin({
- *   configure: (config: Required<VendureConfig>) => {
- *       config.middleware.push({
+ *   configuration: (config: Required<VendureConfig>) => {
+ *       config.apiOptions.middleware.push({
  *           handler: createProxyHandler({
  *               label: 'Admin UI',
  *               route: 'my-plugin',
@@ -108,18 +108,21 @@ export interface ProxyOptions {
 }
 
 /**
- * If any proxy middleware has been set up using the createProxyHandler function, log this information.
+ * Generate CLI greeting lines for any proxy middleware that was set up with the createProxyHandler function.
  */
-export function logProxyMiddlewares(config: VendureConfig) {
-    for (const middleware of config.middleware || []) {
+export function getProxyMiddlewareCliGreetings(config: RuntimeVendureConfig): Array<[string, string]> {
+    const output: Array<[string, string]> = [];
+    for (const middleware of config.apiOptions.middleware || []) {
         if ((middleware.handler as any).proxyMiddleware) {
             const { port, hostname, label, route, basePath } = (middleware.handler as any)
                 .proxyMiddleware as ProxyOptions;
-            Logger.info(
-                `${label}: http://${config.hostname || 'localhost'}:${config.port}/${route}/ -> http://${
-                    hostname || 'localhost'
-                }:${port}${basePath ? `/${basePath}` : ''}`,
-            );
+            output.push([
+                label,
+                `http://${config.apiOptions.hostname || 'localhost'}:${
+                    config.apiOptions.port
+                }/${route}/ -> http://${hostname || 'localhost'}:${port}${basePath ? `/${basePath}` : ''}`,
+            ]);
         }
     }
+    return output;
 }

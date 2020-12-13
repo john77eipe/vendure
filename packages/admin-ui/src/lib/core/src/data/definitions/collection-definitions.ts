@@ -1,4 +1,4 @@
-import gql from 'graphql-tag';
+import { gql } from 'apollo-angular';
 
 import { ASSET_FRAGMENT } from './product-definitions';
 import { CONFIGURABLE_OPERATION_DEF_FRAGMENT, CONFIGURABLE_OPERATION_FRAGMENT } from './shared-definitions';
@@ -18,6 +18,7 @@ export const COLLECTION_FRAGMENT = gql`
         createdAt
         updatedAt
         name
+        slug
         description
         isPrivate
         languageCode
@@ -34,6 +35,7 @@ export const COLLECTION_FRAGMENT = gql`
             id
             languageCode
             name
+            slug
             description
         }
         parent {
@@ -55,6 +57,7 @@ export const GET_COLLECTION_LIST = gql`
             items {
                 id
                 name
+                slug
                 description
                 isPrivate
                 featuredAsset {

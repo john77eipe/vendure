@@ -1,10 +1,13 @@
 import { Args, Mutation, Query, Resolver } from '@nestjs/graphql';
-import { MutationDeleteCustomerAddressArgs } from '@vendure/common/lib/generated-shop-types';
+import {
+    MutationDeleteCustomerAddressArgs,
+    MutationUpdateCustomerArgs,
+    Success,
+} from '@vendure/common/lib/generated-shop-types';
 import {
     MutationCreateCustomerAddressArgs,
-    Permission,
     MutationUpdateCustomerAddressArgs,
-    MutationUpdateCustomerArgs,
+    Permission,
 } from '@vendure/common/lib/generated-types';
 
 import { ForbiddenError, InternalServerError } from '../../../common/error/errors';
@@ -14,6 +17,7 @@ import { CustomerService } from '../../../service/services/customer.service';
 import { RequestContext } from '../../common/request-context';
 import { Allow } from '../../decorators/allow.decorator';
 import { Ctx } from '../../decorators/request-context.decorator';
+import { Transaction } from '../../decorators/transaction.decorator';
 
 @Resolver()
 export class ShopCustomerResolver {
@@ -22,27 +26,13 @@ export class ShopCustomerResolver {
     @Query()
     @Allow(Permission.Owner)
     async activeCustomer(@Ctx() ctx: RequestContext): Promise<Customer | undefined> {
-        const user = ctx.activeUser;
-        if (user) {
-            const customer = await this.customerService.findOneByUserId(user.id);
-            if (customer) {
-                return customer;
-            }
-            // the user is not a Customer, so it must
-            // be an administrator. In this case we need to return
-            // a "dummy" Customer for the admin user.
-            return new Customer({
-                id: user.id,
-                createdAt: user.createdAt,
-                updatedAt: user.updatedAt,
-                firstName: '[admin]',
-                lastName: user.identifier,
-                emailAddress: 'admin@vendure.io',
-                addresses: [],
-            });
+        const userId = ctx.activeUserId;
+        if (userId) {
+            return this.customerService.findOneByUserId(ctx, userId);
         }
     }
 
+    @Transaction()
     @Mutation()
     @Allow(Permission.Owner)
     async updateCustomer(
@@ -50,12 +40,13 @@ export class ShopCustomerResolver {
         @Args() args: MutationUpdateCustomerArgs,
     ): Promise<Customer> {
         const customer = await this.getCustomerForOwner(ctx);
-        return this.customerService.update({
+        return this.customerService.update(ctx, {
             id: customer.id,
             ...args.input,
         });
     }
 
+    @Transaction()
     @Mutation()
     @Allow(Permission.Owner)
     async createCustomerAddress(
@@ -63,9 +54,10 @@ export class ShopCustomerResolver {
         @Args() args: MutationCreateCustomerAddressArgs,
     ): Promise<Address> {
         const customer = await this.getCustomerForOwner(ctx);
-        return this.customerService.createAddress(ctx, customer.id as string, args.input);
+        return this.customerService.createAddress(ctx, customer.id, args.input);
     }
 
+    @Transaction()
     @Mutation()
     @Allow(Permission.Owner)
     async updateCustomerAddress(
@@ -80,18 +72,20 @@ export class ShopCustomerResolver {
         return this.customerService.updateAddress(ctx, args.input);
     }
 
+    @Transaction()
     @Mutation()
     @Allow(Permission.Owner)
     async deleteCustomerAddress(
         @Ctx() ctx: RequestContext,
         @Args() args: MutationDeleteCustomerAddressArgs,
-    ): Promise<boolean> {
+    ): Promise<Success> {
         const customer = await this.getCustomerForOwner(ctx);
         const customerAddresses = await this.customerService.findAddressesByCustomerId(ctx, customer.id);
         if (!customerAddresses.find(address => idsAreEqual(address.id, args.id))) {
             throw new ForbiddenError();
         }
-        return this.customerService.deleteAddress(args.id);
+        const success = await this.customerService.deleteAddress(ctx, args.id);
+        return { success };
     }
 
     /**
@@ -102,7 +96,7 @@ export class ShopCustomerResolver {
         if (!userId) {
             throw new ForbiddenError();
         }
-        const customer = await this.customerService.findOneByUserId(userId);
+        const customer = await this.customerService.findOneByUserId(ctx, userId);
         if (!customer) {
             throw new InternalServerError(`error.no-customer-found-for-current-user`);
         }

@@ -5,13 +5,21 @@ import { ConfigService } from './config.service';
 import { EntityIdStrategy, PrimaryKeyType } from './entity-id-strategy/entity-id-strategy';
 
 export class MockConfigService implements MockClass<ConfigService> {
+    apiOptions = {
+        channelTokenKey: 'vendure-token',
+        adminApiPath: 'admin-api',
+        adminApiPlayground: false,
+        adminApiDebug: true,
+        shopApiPath: 'shop-api',
+        shopApiPlayground: false,
+        shopApiDebug: true,
+        port: 3000,
+        cors: false,
+        middleware: [],
+        apolloServerPlugins: [],
+    };
     authOptions: {};
     defaultChannelToken: 'channel-token';
-    channelTokenKey: 'vendure-token';
-    adminApiPath = 'admin-api';
-    shopApiPath = 'shop-api';
-    port = 3000;
-    cors = false;
     defaultLanguageCode: jest.Mock<any>;
     roundingStrategy: {};
     entityIdStrategy = new MockIdStrategy();
@@ -20,6 +28,7 @@ export class MockConfigService implements MockClass<ConfigService> {
         assetStorageStrategy: {} as any,
         assetPreviewStrategy: {} as any,
     };
+    catalogOptions: {};
     uploadMaxFileSize = 1024;
     dbConnectionOptions = {};
     shippingOptions = {};
@@ -34,18 +43,17 @@ export class MockConfigService implements MockClass<ConfigService> {
     orderOptions = {};
     workerOptions = {};
     customFields = {};
-    middleware = [];
-    logger = {} as any;
-    apolloServerPlugins = [];
+
     plugins = [];
+    logger = {} as any;
     jobQueueOptions = {};
 }
 
 export const ENCODED = 'encoded';
 export const DECODED = 'decoded';
 
-export class MockIdStrategy implements EntityIdStrategy {
-    primaryKeyType = 'integer' as any;
+export class MockIdStrategy implements EntityIdStrategy<'increment'> {
+    readonly primaryKeyType = 'increment';
     encodeId = jest.fn().mockReturnValue(ENCODED);
     decodeId = jest.fn().mockReturnValue(DECODED);
 }

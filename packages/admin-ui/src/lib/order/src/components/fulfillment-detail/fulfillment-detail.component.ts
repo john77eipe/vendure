@@ -1,5 +1,4 @@
 import { ChangeDetectionStrategy, Component, Input } from '@angular/core';
-
 import { OrderDetail } from '@vendure/admin-ui/core';
 
 @Component({
@@ -31,5 +30,16 @@ export class FulfillmentDetailComponent {
             }
         }
         return Array.from(itemMap.entries()).map(([name, quantity]) => ({ name, quantity }));
+    }
+
+    getCustomFields(): Array<{ key: string; value: any }> {
+        const customFields = (this.fulfillment as any).customFields;
+        if (customFields) {
+            return Object.entries(customFields)
+                .filter(([key]) => key !== '__typename')
+                .map(([key, value]) => ({ key, value: (value as any)?.toString() ?? '-' }));
+        } else {
+            return [];
+        }
     }
 }

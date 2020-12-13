@@ -1,20 +1,27 @@
 /* tslint:disable:no-non-null-assertion */
 import { DEFAULT_CHANNEL_CODE } from '@vendure/common/lib/shared-constants';
-import { createTestEnvironment, E2E_DEFAULT_CHANNEL_TOKEN } from '@vendure/testing';
+import {
+    createErrorResultGuard,
+    createTestEnvironment,
+    E2E_DEFAULT_CHANNEL_TOKEN,
+    ErrorResultGuard,
+} from '@vendure/testing';
 import gql from 'graphql-tag';
 import path from 'path';
 
 import { initialData } from '../../../e2e-common/e2e-initial-data';
-import { TEST_SETUP_TIMEOUT_MS, testConfig } from '../../../e2e-common/test-config';
+import { testConfig, TEST_SETUP_TIMEOUT_MS } from '../../../e2e-common/test-config';
 
 import {
     AssignProductsToChannel,
+    ChannelFragment,
     CreateAdministrator,
     CreateChannel,
     CreateRole,
     CurrencyCode,
     DeleteChannel,
     DeletionResult,
+    ErrorCode,
     GetChannels,
     GetCustomerList,
     GetProductWithVariants,
@@ -23,7 +30,7 @@ import {
     Permission,
     RemoveProductsFromChannel,
     UpdateChannel,
-    UpdateGlobalSettings,
+    UpdateGlobalLanguages,
 } from './graphql/generated-e2e-admin-types';
 import {
     ASSIGN_PRODUCT_TO_CHANNEL,
@@ -34,6 +41,7 @@ import {
     GET_PRODUCT_WITH_VARIANTS,
     ME,
     REMOVE_PRODUCT_FROM_CHANNEL,
+    UPDATE_CHANNEL,
 } from './graphql/shared-definitions';
 import { assertThrowsWithMessage } from './utils/assert-throws-with-message';
 
@@ -43,6 +51,10 @@ describe('Channels', () => {
     const THIRD_CHANNEL_TOKEN = 'third_channel_token';
     let secondChannelAdminRole: CreateRole.CreateRole;
     let customerUser: GetCustomerList.Items;
+
+    const channelGuard: ErrorResultGuard<ChannelFragment> = createErrorResultGuard<ChannelFragment>(
+        input => !!input.defaultLanguageCode,
+    );
 
     beforeAll(async () => {
         await server.init({
@@ -65,6 +77,30 @@ describe('Channels', () => {
         await server.destroy();
     });
 
+    it('createChannel returns error result defaultLanguageCode not available', async () => {
+        const { createChannel } = await adminClient.query<CreateChannel.Mutation, CreateChannel.Variables>(
+            CREATE_CHANNEL,
+            {
+                input: {
+                    code: 'second-channel',
+                    token: SECOND_CHANNEL_TOKEN,
+                    defaultLanguageCode: LanguageCode.zh,
+                    currencyCode: CurrencyCode.GBP,
+                    pricesIncludeTax: true,
+                    defaultShippingZoneId: 'T_1',
+                    defaultTaxZoneId: 'T_1',
+                },
+            },
+        );
+        channelGuard.assertErrorResult(createChannel);
+
+        expect(createChannel.message).toBe(
+            'Language "zh" is not available. First enable it via GlobalSettings and try again',
+        );
+        expect(createChannel.errorCode).toBe(ErrorCode.LANGUAGE_NOT_AVAILABLE_ERROR);
+        expect(createChannel.languageCode).toBe('zh');
+    });
+
     it('create a new Channel', async () => {
         const { createChannel } = await adminClient.query<CreateChannel.Mutation, CreateChannel.Variables>(
             CREATE_CHANNEL,
@@ -80,6 +116,7 @@ describe('Channels', () => {
                 },
             },
         );
+        channelGuard.assertSuccess(createChannel);
 
         expect(createChannel).toEqual({
             id: 'T_2',
@@ -102,8 +139,10 @@ describe('Channels', () => {
 
         expect(me!.channels.length).toBe(2);
 
-        const secondChannelData = me!.channels.find((c) => c.token === SECOND_CHANNEL_TOKEN);
-        const nonOwnerPermissions = Object.values(Permission).filter((p) => p !== Permission.Owner);
+        const secondChannelData = me!.channels.find(c => c.token === SECOND_CHANNEL_TOKEN);
+        const nonOwnerPermissions = Object.values(Permission).filter(
+            p => p !== Permission.Owner && p !== Permission.Public,
+        );
         expect(secondChannelData!.permissions).toEqual(nonOwnerPermissions);
     });
 
@@ -113,7 +152,7 @@ describe('Channels', () => {
 
         expect(me!.channels.length).toBe(2);
 
-        const secondChannelData = me!.channels.find((c) => c.token === SECOND_CHANNEL_TOKEN);
+        const secondChannelData = me!.channels.find(c => c.token === SECOND_CHANNEL_TOKEN);
         expect(me!.channels).toEqual([
             {
                 code: DEFAULT_CHANNEL_CODE,
@@ -172,7 +211,7 @@ describe('Channels', () => {
             },
         });
 
-        expect(createAdministrator.user.roles.map((r) => r.description)).toEqual(['second channel admin']);
+        expect(createAdministrator.user.roles.map(r => r.description)).toEqual(['second channel admin']);
     });
 
     it(
@@ -290,7 +329,7 @@ describe('Channels', () => {
                 },
             });
 
-            expect(assignProductsToChannel[0].channels.map((c) => c.id).sort()).toEqual(['T_1', 'T_2']);
+            expect(assignProductsToChannel[0].channels.map(c => c.id).sort()).toEqual(['T_1', 'T_2']);
             await adminClient.setChannelToken(SECOND_CHANNEL_TOKEN);
             const { product } = await adminClient.query<
                 GetProductWithVariants.Query,
@@ -299,12 +338,12 @@ describe('Channels', () => {
                 id: product1.id,
             });
 
-            expect(product!.variants.map((v) => v.price)).toEqual(
-                product1.variants.map((v) => v.price * PRICE_FACTOR),
+            expect(product!.variants.map(v => v.price)).toEqual(
+                product1.variants.map(v => v.price * PRICE_FACTOR),
             );
             // Second Channel is configured to include taxes in price, so they should be the same.
-            expect(product!.variants.map((v) => v.priceWithTax)).toEqual(
-                product1.variants.map((v) => v.price * PRICE_FACTOR),
+            expect(product!.variants.map(v => v.priceWithTax)).toEqual(
+                product1.variants.map(v => v.price * PRICE_FACTOR),
             );
         });
 
@@ -319,7 +358,7 @@ describe('Channels', () => {
                 },
             });
 
-            expect(assignProductsToChannel[0].channels.map((c) => c.id).sort()).toEqual(['T_1', 'T_2']);
+            expect(assignProductsToChannel[0].channels.map(c => c.id).sort()).toEqual(['T_1', 'T_2']);
         });
 
         it(
@@ -350,26 +389,33 @@ describe('Channels', () => {
                 },
             });
 
-            expect(removeProductsFromChannel[0].channels.map((c) => c.id)).toEqual(['T_1']);
+            expect(removeProductsFromChannel[0].channels.map(c => c.id)).toEqual(['T_1']);
         });
     });
 
     describe('setting defaultLanguage', () => {
-        it(
-            'throws if languageCode not in availableLanguages',
-            assertThrowsWithMessage(async () => {
-                await adminClient.query<UpdateChannel.Mutation, UpdateChannel.Variables>(UPDATE_CHANNEL, {
-                    input: {
-                        id: 'T_1',
-                        defaultLanguageCode: LanguageCode.zh,
-                    },
-                });
-            }, 'Language "zh" is not available. First enable it via GlobalSettings and try again.'),
-        );
+        it('returns error result if languageCode not in availableLanguages', async () => {
+            const { updateChannel } = await adminClient.query<
+                UpdateChannel.Mutation,
+                UpdateChannel.Variables
+            >(UPDATE_CHANNEL, {
+                input: {
+                    id: 'T_1',
+                    defaultLanguageCode: LanguageCode.zh,
+                },
+            });
+            channelGuard.assertErrorResult(updateChannel);
+
+            expect(updateChannel.message).toBe(
+                'Language "zh" is not available. First enable it via GlobalSettings and try again',
+            );
+            expect(updateChannel.errorCode).toBe(ErrorCode.LANGUAGE_NOT_AVAILABLE_ERROR);
+            expect(updateChannel.languageCode).toBe('zh');
+        });
 
         it('allows setting to an available language', async () => {
-            await adminClient.query<UpdateGlobalSettings.Mutation, UpdateGlobalSettings.Variables>(
-                UPDATE_GLOBAL_SETTINGS,
+            await adminClient.query<UpdateGlobalLanguages.Mutation, UpdateGlobalLanguages.Variables>(
+                UPDATE_GLOBAL_LANGUAGES,
                 {
                     input: {
                         availableLanguages: [LanguageCode.en, LanguageCode.zh],
@@ -389,20 +435,6 @@ describe('Channels', () => {
 
             expect(updateChannel.defaultLanguageCode).toBe(LanguageCode.zh);
         });
-
-        it(
-            'attempting to remove availableLanguage when used by a Channel throws',
-            assertThrowsWithMessage(async () => {
-                await adminClient.query<UpdateGlobalSettings.Mutation, UpdateGlobalSettings.Variables>(
-                    UPDATE_GLOBAL_SETTINGS,
-                    {
-                        input: {
-                            availableLanguages: [LanguageCode.en],
-                        },
-                    },
-                );
-            }, 'Cannot remove make language "zh" unavailable as it is used as the defaultLanguage by the channel "__default_channel__"'),
-        );
     });
 
     it('deleteChannel', async () => {
@@ -417,7 +449,7 @@ describe('Channels', () => {
                 productIds: [PROD_ID],
             },
         });
-        expect(assignProductsToChannel[0].channels.map((c) => c.id).sort()).toEqual(['T_1', 'T_2']);
+        expect(assignProductsToChannel[0].channels.map(c => c.id).sort()).toEqual(['T_1', 'T_2']);
 
         const { deleteChannel } = await adminClient.query<DeleteChannel.Mutation, DeleteChannel.Variables>(
             DELETE_CHANNEL,
@@ -429,7 +461,7 @@ describe('Channels', () => {
         expect(deleteChannel.result).toBe(DeletionResult.DELETED);
 
         const { channels } = await adminClient.query<GetChannels.Query>(GET_CHANNELS);
-        expect(channels.map((c) => c.id).sort()).toEqual(['T_1', 'T_3']);
+        expect(channels.map(c => c.id).sort()).toEqual(['T_1', 'T_3']);
 
         const { product } = await adminClient.query<
             GetProductWithVariants.Query,
@@ -437,7 +469,7 @@ describe('Channels', () => {
         >(GET_PRODUCT_WITH_VARIANTS, {
             id: PROD_ID,
         });
-        expect(product!.channels.map((c) => c.id)).toEqual(['T_1']);
+        expect(product!.channels.map(c => c.id)).toEqual(['T_1']);
     });
 });
 
@@ -451,17 +483,6 @@ const GET_CHANNELS = gql`
     }
 `;
 
-const UPDATE_CHANNEL = gql`
-    mutation UpdateChannel($input: UpdateChannelInput!) {
-        updateChannel(input: $input) {
-            id
-            code
-            defaultLanguageCode
-            currencyCode
-        }
-    }
-`;
-
 const DELETE_CHANNEL = gql`
     mutation DeleteChannel($id: ID!) {
         deleteChannel(id: $id) {
@@ -471,11 +492,13 @@ const DELETE_CHANNEL = gql`
     }
 `;
 
-const UPDATE_GLOBAL_SETTINGS = gql`
-    mutation UpdateGlobalSettings($input: UpdateGlobalSettingsInput!) {
+const UPDATE_GLOBAL_LANGUAGES = gql`
+    mutation UpdateGlobalLanguages($input: UpdateGlobalSettingsInput!) {
         updateGlobalSettings(input: $input) {
-            id
-            availableLanguages
+            ... on GlobalSettings {
+                id
+                availableLanguages
+            }
         }
     }
 `;

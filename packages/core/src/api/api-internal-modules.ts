@@ -6,6 +6,7 @@ import { JobQueueModule } from '../job-queue/job-queue.module';
 import { createDynamicGraphQlModulesForPlugins } from '../plugin/dynamic-plugin-api.module';
 import { ServiceModule } from '../service/service.module';
 
+import { ConfigurableOperationCodec } from './common/configurable-operation-codec';
 import { IdCodecService } from './common/id-codec.service';
 import { AdministratorResolver } from './resolvers/admin/administrator.resolver';
 import { AssetResolver } from './resolvers/admin/asset.resolver';
@@ -30,16 +31,28 @@ import { ShippingMethodResolver } from './resolvers/admin/shipping-method.resolv
 import { TaxCategoryResolver } from './resolvers/admin/tax-category.resolver';
 import { TaxRateResolver } from './resolvers/admin/tax-rate.resolver';
 import { ZoneResolver } from './resolvers/admin/zone.resolver';
+import { AdministratorEntityResolver } from './resolvers/entity/administrator-entity.resolver';
 import { CollectionEntityResolver } from './resolvers/entity/collection-entity.resolver';
-import { CustomerEntityResolver } from './resolvers/entity/customer-entity.resolver';
-import { FulfillmentEntityResolver } from './resolvers/entity/fulfillment-entity.resolver';
-import { OrderEntityResolver } from './resolvers/entity/order-entity.resolver';
+import {
+    CustomerAdminEntityResolver,
+    CustomerEntityResolver,
+} from './resolvers/entity/customer-entity.resolver';
+import { CustomerGroupEntityResolver } from './resolvers/entity/customer-group-entity.resolver';
+import { FacetEntityResolver } from './resolvers/entity/facet-entity.resolver';
+import { FacetValueEntityResolver } from './resolvers/entity/facet-value-entity.resolver';
+import {
+    FulfillmentAdminEntityResolver,
+    FulfillmentEntityResolver,
+} from './resolvers/entity/fulfillment-entity.resolver';
+import { OrderAdminEntityResolver, OrderEntityResolver } from './resolvers/entity/order-entity.resolver';
 import { OrderLineEntityResolver } from './resolvers/entity/order-line-entity.resolver';
 import { PaymentEntityResolver } from './resolvers/entity/payment-entity.resolver';
+import { PaymentMethodEntityResolver } from './resolvers/entity/payment-method-entity.resolver';
 import {
     ProductAdminEntityResolver,
     ProductEntityResolver,
 } from './resolvers/entity/product-entity.resolver';
+import { ProductOptionEntityResolver } from './resolvers/entity/product-option-entity.resolver';
 import { ProductOptionGroupEntityResolver } from './resolvers/entity/product-option-group-entity.resolver';
 import {
     ProductVariantAdminEntityResolver,
@@ -47,6 +60,7 @@ import {
 } from './resolvers/entity/product-variant-entity.resolver';
 import { RefundEntityResolver } from './resolvers/entity/refund-entity.resolver';
 import { RoleEntityResolver } from './resolvers/entity/role-entity.resolver';
+import { UserEntityResolver } from './resolvers/entity/user-entity.resolver';
 import { ShopAuthResolver } from './resolvers/shop/shop-auth.resolver';
 import { ShopCustomerResolver } from './resolvers/shop/shop-customer.resolver';
 import { ShopEnvironmentResolver } from './resolvers/shop/shop-environment.resolver';
@@ -88,20 +102,33 @@ const shopResolvers = [
 ];
 
 export const entityResolvers = [
+    AdministratorEntityResolver,
     CollectionEntityResolver,
     CustomerEntityResolver,
+    CustomerGroupEntityResolver,
+    FacetEntityResolver,
+    FacetValueEntityResolver,
     FulfillmentEntityResolver,
     OrderEntityResolver,
     OrderLineEntityResolver,
     PaymentEntityResolver,
+    PaymentMethodEntityResolver,
     ProductEntityResolver,
+    ProductOptionEntityResolver,
     ProductOptionGroupEntityResolver,
     ProductVariantEntityResolver,
     RefundEntityResolver,
     RoleEntityResolver,
+    UserEntityResolver,
 ];
 
-export const adminEntityResolvers = [ProductVariantAdminEntityResolver, ProductAdminEntityResolver];
+export const adminEntityResolvers = [
+    CustomerAdminEntityResolver,
+    OrderAdminEntityResolver,
+    FulfillmentAdminEntityResolver,
+    ProductVariantAdminEntityResolver,
+    ProductAdminEntityResolver,
+];
 
 /**
  * The internal module containing some shared providers used by more than
@@ -109,8 +136,8 @@ export const adminEntityResolvers = [ProductVariantAdminEntityResolver, ProductA
  */
 @Module({
     imports: [ConfigModule],
-    providers: [IdCodecService],
-    exports: [IdCodecService, ConfigModule],
+    providers: [IdCodecService, ConfigurableOperationCodec],
+    exports: [IdCodecService, ConfigModule, ConfigurableOperationCodec],
 })
 export class ApiSharedModule {}
 

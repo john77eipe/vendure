@@ -1,17 +1,17 @@
 import { ConfigArg } from '@vendure/common/lib/generated-types';
-import { ConfigArgSubset } from '@vendure/common/lib/shared-types';
 
+import { RequestContext } from '../../api/common/request-context';
 import {
-    argsArrayToHash,
     ConfigArgs,
     ConfigArgValues,
     ConfigurableOperationDef,
-    LocalizedStringArray,
+    ConfigurableOperationDefOptions,
 } from '../../common/configurable-operation';
 import { Order } from '../../entity/order/order.entity';
 
-export type ShippingCalculatorArgType = ConfigArgSubset<'int' | 'float' | 'string' | 'boolean'>;
-export type ShippingCalculatorArgs = ConfigArgs<ShippingCalculatorArgType>;
+export interface ShippingCalculatorConfig<T extends ConfigArgs> extends ConfigurableOperationDefOptions<T> {
+    calculate: CalculateShippingFn<T>;
+}
 
 /**
  * @description
@@ -37,24 +37,11 @@ export type ShippingCalculatorArgs = ConfigArgs<ShippingCalculatorArgType>;
  * @docsCategory shipping
  * @docsPage ShippingCalculator
  */
-export class ShippingCalculator<T extends ShippingCalculatorArgs = {}> implements ConfigurableOperationDef {
-    /** @internal */
-    readonly code: string;
-    /** @internal */
-    readonly description: LocalizedStringArray;
-    /** @internal */
-    readonly args: ShippingCalculatorArgs;
+export class ShippingCalculator<T extends ConfigArgs = ConfigArgs> extends ConfigurableOperationDef<T> {
     private readonly calculateFn: CalculateShippingFn<T>;
 
-    constructor(config: {
-        args: T;
-        calculate: CalculateShippingFn<T>;
-        code: string;
-        description: LocalizedStringArray;
-    }) {
-        this.code = config.code;
-        this.description = config.description;
-        this.args = config.args;
+    constructor(config: ShippingCalculatorConfig<T>) {
+        super(config);
         this.calculateFn = config.calculate;
     }
 
@@ -64,11 +51,8 @@ export class ShippingCalculator<T extends ShippingCalculatorArgs = {}> implement
      *
      * @internal
      */
-    calculate(
-        order: Order,
-        args: ConfigArg[],
-    ): ShippingCalculationResult | Promise<ShippingCalculationResult> {
-        return this.calculateFn(order, argsArrayToHash(args));
+    calculate(ctx: RequestContext, order: Order, args: ConfigArg[]): CalculateShippingFnResult {
+        return this.calculateFn(ctx, order, this.argsArrayToHash(args));
     }
 }
 
@@ -98,6 +82,11 @@ export interface ShippingCalculationResult {
     metadata?: Record<string, any>;
 }
 
+export type CalculateShippingFnResult =
+    | ShippingCalculationResult
+    | Promise<ShippingCalculationResult | undefined>
+    | undefined;
+
 /**
  * @description
  * A function which implements the specific shipping calculation logic. It takes an {@link Order} and
@@ -108,7 +97,8 @@ export interface ShippingCalculationResult {
  * @docsCategory shipping
  * @docsPage ShippingCalculator
  */
-export type CalculateShippingFn<T extends ShippingCalculatorArgs> = (
+export type CalculateShippingFn<T extends ConfigArgs> = (
+    ctx: RequestContext,
     order: Order,
     args: ConfigArgValues<T>,
-) => ShippingCalculationResult | Promise<ShippingCalculationResult>;
+) => CalculateShippingFnResult;

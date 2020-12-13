@@ -1,6 +1,6 @@
 /* tslint:disable:no-non-null-assertion */
 import { OnModuleInit } from '@nestjs/common';
-import { RegisterCustomerInput } from '@vendure/common/lib/generated-shop-types';
+import { ErrorCode, RegisterCustomerInput } from '@vendure/common/lib/generated-shop-types';
 import { pick } from '@vendure/common/lib/pick';
 import {
     AccountRegistrationEvent,
@@ -12,21 +12,25 @@ import {
     PasswordResetEvent,
     VendurePlugin,
 } from '@vendure/core';
-import { createTestEnvironment } from '@vendure/testing';
+import { createErrorResultGuard, createTestEnvironment, ErrorResultGuard } from '@vendure/testing';
 import { DocumentNode } from 'graphql';
 import gql from 'graphql-tag';
 import path from 'path';
 
 import { initialData } from '../../../e2e-common/e2e-initial-data';
-import { TEST_SETUP_TIMEOUT_MS, testConfig } from '../../../e2e-common/test-config';
+import { testConfig, TEST_SETUP_TIMEOUT_MS } from '../../../e2e-common/test-config';
 
 import {
     CreateAdministrator,
     CreateRole,
     GetCustomer,
+    GetCustomerHistory,
+    GetCustomerList,
+    HistoryEntryType,
     Permission,
 } from './graphql/generated-e2e-admin-types';
 import {
+    CurrentUserShopFragment,
     GetActiveCustomer,
     RefreshToken,
     Register,
@@ -36,7 +40,13 @@ import {
     UpdateEmailAddress,
     Verify,
 } from './graphql/generated-e2e-shop-types';
-import { CREATE_ADMINISTRATOR, CREATE_ROLE, GET_CUSTOMER } from './graphql/shared-definitions';
+import {
+    CREATE_ADMINISTRATOR,
+    CREATE_ROLE,
+    GET_CUSTOMER,
+    GET_CUSTOMER_HISTORY,
+    GET_CUSTOMER_LIST,
+} from './graphql/shared-definitions';
 import {
     GET_ACTIVE_CUSTOMER,
     REFRESH_TOKEN,
@@ -76,6 +86,14 @@ class TestEmailPlugin implements OnModuleInit {
     }
 }
 
+const successErrorGuard: ErrorResultGuard<{ success: boolean }> = createErrorResultGuard<{
+    success: boolean;
+}>(input => input.success != null);
+
+const currentUserErrorGuard: ErrorResultGuard<CurrentUserShopFragment> = createErrorResultGuard<
+    CurrentUserShopFragment
+>(input => input.identifier != null);
+
 describe('Shop auth & accounts', () => {
     const { server, adminClient, shopClient } = createTestEnvironment(
         mergeConfig(testConfig, {
@@ -96,53 +114,78 @@ describe('Shop auth & accounts', () => {
         await server.destroy();
     });
 
-    describe('customer account creation', () => {
+    describe('customer account creation with deferred password', () => {
         const password = 'password';
         const emailAddress = 'test1@test.com';
         let verificationToken: string;
+        let newCustomerId: string;
 
         beforeEach(() => {
             sendEmailFn = jest.fn();
         });
 
-        it(
-            'errors if a password is provided',
-            assertThrowsWithMessage(async () => {
-                const input: RegisterCustomerInput = {
-                    firstName: 'Sofia',
-                    lastName: 'Green',
-                    emailAddress: 'sofia.green@test.com',
-                    password: 'test',
-                };
-                const result = await shopClient.query<Register.Mutation, Register.Variables>(
-                    REGISTER_ACCOUNT,
-                    { input },
-                );
-            }, 'Do not provide a password when `authOptions.requireVerification` is set to "true"'),
-        );
+        it('does not return error result on email address conflict', async () => {
+            // To prevent account enumeration attacks
+            const { customers } = await adminClient.query<GetCustomerList.Query>(GET_CUSTOMER_LIST);
+            const input: RegisterCustomerInput = {
+                firstName: 'Duplicate',
+                lastName: 'Person',
+                phoneNumber: '123456',
+                emailAddress: customers.items[0].emailAddress,
+            };
+            const { registerCustomerAccount } = await shopClient.query<Register.Mutation, Register.Variables>(
+                REGISTER_ACCOUNT,
+                {
+                    input,
+                },
+            );
+            successErrorGuard.assertSuccess(registerCustomerAccount);
+        });
 
-        it('register a new account', async () => {
+        it('register a new account without password', async () => {
             const verificationTokenPromise = getVerificationTokenPromise();
             const input: RegisterCustomerInput = {
                 firstName: 'Sean',
                 lastName: 'Tester',
+                phoneNumber: '123456',
                 emailAddress,
             };
-            const result = await shopClient.query<Register.Mutation, Register.Variables>(REGISTER_ACCOUNT, {
-                input,
-            });
+            const { registerCustomerAccount } = await shopClient.query<Register.Mutation, Register.Variables>(
+                REGISTER_ACCOUNT,
+                {
+                    input,
+                },
+            );
+            successErrorGuard.assertSuccess(registerCustomerAccount);
 
             verificationToken = await verificationTokenPromise;
 
-            expect(result.registerCustomerAccount).toBe(true);
+            expect(registerCustomerAccount.success).toBe(true);
             expect(sendEmailFn).toHaveBeenCalled();
             expect(verificationToken).toBeDefined();
+
+            const { customers } = await adminClient.query<GetCustomerList.Query, GetCustomerList.Variables>(
+                GET_CUSTOMER_LIST,
+                {
+                    options: {
+                        filter: {
+                            emailAddress: {
+                                eq: emailAddress,
+                            },
+                        },
+                    },
+                },
+            );
+
+            expect(
+                pick(customers.items[0], ['firstName', 'lastName', 'emailAddress', 'phoneNumber']),
+            ).toEqual(input);
         });
 
         it('issues a new token if attempting to register a second time', async () => {
             const sendEmail = new Promise<string>(resolve => {
                 sendEmailFn.mockImplementation((event: AccountRegistrationEvent) => {
-                    resolve(event.user.verificationToken!);
+                    resolve(event.user.getNativeAuthenticationMethod().verificationToken!);
                 });
             });
             const input: RegisterCustomerInput = {
@@ -150,13 +193,17 @@ describe('Shop auth & accounts', () => {
                 lastName: 'Tester',
                 emailAddress,
             };
-            const result = await shopClient.query<Register.Mutation, Register.Variables>(REGISTER_ACCOUNT, {
-                input,
-            });
+            const { registerCustomerAccount } = await shopClient.query<Register.Mutation, Register.Variables>(
+                REGISTER_ACCOUNT,
+                {
+                    input,
+                },
+            );
+            successErrorGuard.assertSuccess(registerCustomerAccount);
 
             const newVerificationToken = await sendEmail;
 
-            expect(result.registerCustomerAccount).toBe(true);
+            expect(registerCustomerAccount.success).toBe(true);
             expect(sendEmailFn).toHaveBeenCalled();
             expect(newVerificationToken).not.toBe(verificationToken);
 
@@ -166,17 +213,17 @@ describe('Shop auth & accounts', () => {
         it('refreshCustomerVerification issues a new token', async () => {
             const sendEmail = new Promise<string>(resolve => {
                 sendEmailFn.mockImplementation((event: AccountRegistrationEvent) => {
-                    resolve(event.user.verificationToken!);
+                    resolve(event.user.getNativeAuthenticationMethod().verificationToken!);
                 });
             });
-            const result = await shopClient.query<RefreshToken.Mutation, RefreshToken.Variables>(
-                REFRESH_TOKEN,
-                { emailAddress },
-            );
-
+            const { refreshCustomerVerification } = await shopClient.query<
+                RefreshToken.Mutation,
+                RefreshToken.Variables
+            >(REFRESH_TOKEN, { emailAddress });
+            successErrorGuard.assertSuccess(refreshCustomerVerification);
             const newVerificationToken = await sendEmail;
 
-            expect(result.refreshCustomerVerification).toBe(true);
+            expect(refreshCustomerVerification.success).toBe(true);
             expect(sendEmailFn).toHaveBeenCalled();
             expect(newVerificationToken).not.toBe(verificationToken);
 
@@ -184,45 +231,64 @@ describe('Shop auth & accounts', () => {
         });
 
         it('refreshCustomerVerification does nothing with an unrecognized emailAddress', async () => {
-            const result = await shopClient.query<RefreshToken.Mutation, RefreshToken.Variables>(
-                REFRESH_TOKEN,
-                {
-                    emailAddress: 'never-been-registered@test.com',
-                },
-            );
+            const { refreshCustomerVerification } = await shopClient.query<
+                RefreshToken.Mutation,
+                RefreshToken.Variables
+            >(REFRESH_TOKEN, {
+                emailAddress: 'never-been-registered@test.com',
+            });
+            successErrorGuard.assertSuccess(refreshCustomerVerification);
             await waitForSendEmailFn();
-            expect(result.refreshCustomerVerification).toBe(true);
+
+            expect(refreshCustomerVerification.success).toBe(true);
             expect(sendEmailFn).not.toHaveBeenCalled();
         });
 
         it('login fails before verification', async () => {
-            try {
-                await shopClient.asUserWithCredentials(emailAddress, '');
-                fail('should have thrown');
-            } catch (err) {
-                expect(getErrorCode(err)).toBe('UNAUTHORIZED');
-            }
+            const result = await shopClient.asUserWithCredentials(emailAddress, '');
+            expect(result.errorCode).toBe(ErrorCode.INVALID_CREDENTIALS_ERROR);
         });
 
-        it(
-            'verification fails with wrong token',
-            assertThrowsWithMessage(
-                () =>
-                    shopClient.query<Verify.Mutation, Verify.Variables>(VERIFY_EMAIL, {
-                        password,
-                        token: 'bad-token',
-                    }),
-                `Verification token not recognized`,
-            ),
-        );
+        it('verification fails with wrong token', async () => {
+            const { verifyCustomerAccount } = await shopClient.query<Verify.Mutation, Verify.Variables>(
+                VERIFY_EMAIL,
+                {
+                    password,
+                    token: 'bad-token',
+                },
+            );
+            currentUserErrorGuard.assertErrorResult(verifyCustomerAccount);
 
-        it('verification succeeds with correct token', async () => {
-            const result = await shopClient.query<Verify.Mutation, Verify.Variables>(VERIFY_EMAIL, {
-                password,
-                token: verificationToken,
-            });
+            expect(verifyCustomerAccount.message).toBe(`Verification token not recognized`);
+            expect(verifyCustomerAccount.errorCode).toBe(ErrorCode.VERIFICATION_TOKEN_INVALID_ERROR);
+        });
 
-            expect(result.verifyCustomerAccount.user.identifier).toBe('test1@test.com');
+        it('verification fails with no password', async () => {
+            const { verifyCustomerAccount } = await shopClient.query<Verify.Mutation, Verify.Variables>(
+                VERIFY_EMAIL,
+                {
+                    token: verificationToken,
+                },
+            );
+            currentUserErrorGuard.assertErrorResult(verifyCustomerAccount);
+
+            expect(verifyCustomerAccount.message).toBe(`A password must be provided.`);
+            expect(verifyCustomerAccount.errorCode).toBe(ErrorCode.MISSING_PASSWORD_ERROR);
+        });
+
+        it('verification succeeds with password and correct token', async () => {
+            const { verifyCustomerAccount } = await shopClient.query<Verify.Mutation, Verify.Variables>(
+                VERIFY_EMAIL,
+                {
+                    password,
+                    token: verificationToken,
+                },
+            );
+            currentUserErrorGuard.assertSuccess(verifyCustomerAccount);
+
+            expect(verifyCustomerAccount.identifier).toBe('test1@test.com');
+            const { activeCustomer } = await shopClient.query<GetActiveCustomer.Query>(GET_ACTIVE_CUSTOMER);
+            newCustomerId = activeCustomer!.id;
         });
 
         it('registration silently fails if attempting to register an email already verified', async () => {
@@ -231,25 +297,143 @@ describe('Shop auth & accounts', () => {
                 lastName: 'Hacker',
                 emailAddress,
             };
-            const result = await shopClient.query<Register.Mutation, Register.Variables>(REGISTER_ACCOUNT, {
-                input,
-            });
+            const { registerCustomerAccount } = await shopClient.query<Register.Mutation, Register.Variables>(
+                REGISTER_ACCOUNT,
+                {
+                    input,
+                },
+            );
+            successErrorGuard.assertSuccess(registerCustomerAccount);
+
             await waitForSendEmailFn();
-            expect(result.registerCustomerAccount).toBe(true);
+            expect(registerCustomerAccount.success).toBe(true);
             expect(sendEmailFn).not.toHaveBeenCalled();
         });
 
-        it(
-            'verification fails if attempted a second time',
-            assertThrowsWithMessage(
-                () =>
-                    shopClient.query<Verify.Mutation, Verify.Variables>(VERIFY_EMAIL, {
-                        password,
-                        token: verificationToken,
-                    }),
-                `Verification token not recognized`,
-            ),
-        );
+        it('verification fails if attempted a second time', async () => {
+            const { verifyCustomerAccount } = await shopClient.query<Verify.Mutation, Verify.Variables>(
+                VERIFY_EMAIL,
+                {
+                    password,
+                    token: verificationToken,
+                },
+            );
+            currentUserErrorGuard.assertErrorResult(verifyCustomerAccount);
+
+            expect(verifyCustomerAccount.message).toBe(`Verification token not recognized`);
+            expect(verifyCustomerAccount.errorCode).toBe(ErrorCode.VERIFICATION_TOKEN_INVALID_ERROR);
+        });
+
+        it('customer history contains entries for registration & verification', async () => {
+            const { customer } = await adminClient.query<
+                GetCustomerHistory.Query,
+                GetCustomerHistory.Variables
+            >(GET_CUSTOMER_HISTORY, {
+                id: newCustomerId,
+            });
+
+            expect(customer?.history.items.map(pick(['type', 'data']))).toEqual([
+                {
+                    type: HistoryEntryType.CUSTOMER_REGISTERED,
+                    data: {
+                        strategy: 'native',
+                    },
+                },
+                {
+                    // second entry because we register twice above
+                    type: HistoryEntryType.CUSTOMER_REGISTERED,
+                    data: {
+                        strategy: 'native',
+                    },
+                },
+                {
+                    type: HistoryEntryType.CUSTOMER_VERIFIED,
+                    data: {
+                        strategy: 'native',
+                    },
+                },
+            ]);
+        });
+    });
+
+    describe('customer account creation with up-front password', () => {
+        const password = 'password';
+        const emailAddress = 'test2@test.com';
+        let verificationToken: string;
+
+        it('register a new account with password', async () => {
+            const verificationTokenPromise = getVerificationTokenPromise();
+            const input: RegisterCustomerInput = {
+                firstName: 'Lu',
+                lastName: 'Tester',
+                phoneNumber: '443324',
+                emailAddress,
+                password,
+            };
+            const { registerCustomerAccount } = await shopClient.query<Register.Mutation, Register.Variables>(
+                REGISTER_ACCOUNT,
+                {
+                    input,
+                },
+            );
+            successErrorGuard.assertSuccess(registerCustomerAccount);
+
+            verificationToken = await verificationTokenPromise;
+
+            expect(registerCustomerAccount.success).toBe(true);
+            expect(sendEmailFn).toHaveBeenCalled();
+            expect(verificationToken).toBeDefined();
+
+            const { customers } = await adminClient.query<GetCustomerList.Query, GetCustomerList.Variables>(
+                GET_CUSTOMER_LIST,
+                {
+                    options: {
+                        filter: {
+                            emailAddress: {
+                                eq: emailAddress,
+                            },
+                        },
+                    },
+                },
+            );
+
+            expect(
+                pick(customers.items[0], ['firstName', 'lastName', 'emailAddress', 'phoneNumber']),
+            ).toEqual(pick(input, ['firstName', 'lastName', 'emailAddress', 'phoneNumber']));
+        });
+
+        it('login fails before verification', async () => {
+            const result = await shopClient.asUserWithCredentials(emailAddress, password);
+            expect(result.errorCode).toBe(ErrorCode.NOT_VERIFIED_ERROR);
+            expect(result.message).toBe('Please verify this email address before logging in');
+        });
+
+        it('verification fails with password', async () => {
+            const { verifyCustomerAccount } = await shopClient.query<Verify.Mutation, Verify.Variables>(
+                VERIFY_EMAIL,
+                {
+                    token: verificationToken,
+                    password: 'new password',
+                },
+            );
+            currentUserErrorGuard.assertErrorResult(verifyCustomerAccount);
+
+            expect(verifyCustomerAccount.message).toBe(`A password has already been set during registration`);
+            expect(verifyCustomerAccount.errorCode).toBe(ErrorCode.PASSWORD_ALREADY_SET_ERROR);
+        });
+
+        it('verification succeeds with no password and correct token', async () => {
+            const { verifyCustomerAccount } = await shopClient.query<Verify.Mutation, Verify.Variables>(
+                VERIFY_EMAIL,
+                {
+                    token: verificationToken,
+                },
+            );
+            currentUserErrorGuard.assertSuccess(verifyCustomerAccount);
+
+            expect(verifyCustomerAccount.identifier).toBe('test2@test.com');
+            const { activeCustomer } = await shopClient.query<GetActiveCustomer.Query>(GET_ACTIVE_CUSTOMER);
+        });
     });
 
     describe('password reset', () => {
@@ -268,58 +452,89 @@ describe('Shop auth & accounts', () => {
         });
 
         it('requestPasswordReset silently fails with invalid identifier', async () => {
-            const result = await shopClient.query<
+            const { requestPasswordReset } = await shopClient.query<
                 RequestPasswordReset.Mutation,
                 RequestPasswordReset.Variables
             >(REQUEST_PASSWORD_RESET, {
                 identifier: 'invalid-identifier',
             });
+            successErrorGuard.assertSuccess(requestPasswordReset);
 
             await waitForSendEmailFn();
-            expect(result.requestPasswordReset).toBe(true);
+            expect(requestPasswordReset.success).toBe(true);
             expect(sendEmailFn).not.toHaveBeenCalled();
             expect(passwordResetToken).not.toBeDefined();
         });
 
         it('requestPasswordReset sends reset token', async () => {
             const passwordResetTokenPromise = getPasswordResetTokenPromise();
-            const result = await shopClient.query<
+            const { requestPasswordReset } = await shopClient.query<
                 RequestPasswordReset.Mutation,
                 RequestPasswordReset.Variables
             >(REQUEST_PASSWORD_RESET, {
                 identifier: customer.emailAddress,
             });
+            successErrorGuard.assertSuccess(requestPasswordReset);
 
             passwordResetToken = await passwordResetTokenPromise;
 
-            expect(result.requestPasswordReset).toBe(true);
+            expect(requestPasswordReset.success).toBe(true);
             expect(sendEmailFn).toHaveBeenCalled();
             expect(passwordResetToken).toBeDefined();
         });
 
-        it(
-            'resetPassword fails with wrong token',
-            assertThrowsWithMessage(
-                () =>
-                    shopClient.query<ResetPassword.Mutation, ResetPassword.Variables>(RESET_PASSWORD, {
-                        password: 'newPassword',
-                        token: 'bad-token',
-                    }),
-                `Password reset token not recognized`,
-            ),
-        );
+        it('resetPassword returns error result with wrong token', async () => {
+            const { resetPassword } = await shopClient.query<ResetPassword.Mutation, ResetPassword.Variables>(
+                RESET_PASSWORD,
+                {
+                    password: 'newPassword',
+                    token: 'bad-token',
+                },
+            );
+            currentUserErrorGuard.assertErrorResult(resetPassword);
+
+            expect(resetPassword.message).toBe(`Password reset token not recognized`);
+            expect(resetPassword.errorCode).toBe(ErrorCode.PASSWORD_RESET_TOKEN_INVALID_ERROR);
+        });
 
         it('resetPassword works with valid token', async () => {
-            const result = await shopClient.query<ResetPassword.Mutation, ResetPassword.Variables>(
+            const { resetPassword } = await shopClient.query<ResetPassword.Mutation, ResetPassword.Variables>(
                 RESET_PASSWORD,
                 {
                     token: passwordResetToken,
                     password: 'newPassword',
                 },
             );
+            currentUserErrorGuard.assertSuccess(resetPassword);
+
+            expect(resetPassword.identifier).toBe(customer.emailAddress);
 
             const loginResult = await shopClient.asUserWithCredentials(customer.emailAddress, 'newPassword');
-            expect(loginResult.user.identifier).toBe(customer.emailAddress);
+            expect(loginResult.identifier).toBe(customer.emailAddress);
+        });
+
+        it('customer history for password reset', async () => {
+            const result = await adminClient.query<GetCustomerHistory.Query, GetCustomerHistory.Variables>(
+                GET_CUSTOMER_HISTORY,
+                {
+                    id: customer.id,
+                    options: {
+                        // skip CUSTOMER_ADDRESS_CREATED entry
+                        skip: 3,
+                    },
+                },
+            );
+
+            expect(result.customer?.history.items.map(pick(['type', 'data']))).toEqual([
+                {
+                    type: HistoryEntryType.CUSTOMER_PASSWORD_RESET_REQUESTED,
+                    data: {},
+                },
+                {
+                    type: HistoryEntryType.CUSTOMER_PASSWORD_RESET_VERIFIED,
+                    data: {},
+                },
+            ]);
         });
     });
 
@@ -356,41 +571,40 @@ describe('Shop auth & accounts', () => {
             }
         });
 
-        it('throws if password is incorrect', async () => {
-            try {
-                await shopClient.asUserWithCredentials(customer.emailAddress, PASSWORD);
-                await shopClient.query<
-                    RequestUpdateEmailAddress.Mutation,
-                    RequestUpdateEmailAddress.Variables
-                >(REQUEST_UPDATE_EMAIL_ADDRESS, {
-                    password: 'bad password',
-                    newEmailAddress: NEW_EMAIL_ADDRESS,
-                });
-                fail('should have thrown');
-            } catch (err) {
-                expect(getErrorCode(err)).toBe('UNAUTHORIZED');
-            }
+        it('return error result if password is incorrect', async () => {
+            await shopClient.asUserWithCredentials(customer.emailAddress, PASSWORD);
+            const { requestUpdateCustomerEmailAddress } = await shopClient.query<
+                RequestUpdateEmailAddress.Mutation,
+                RequestUpdateEmailAddress.Variables
+            >(REQUEST_UPDATE_EMAIL_ADDRESS, {
+                password: 'bad password',
+                newEmailAddress: NEW_EMAIL_ADDRESS,
+            });
+            successErrorGuard.assertErrorResult(requestUpdateCustomerEmailAddress);
+
+            expect(requestUpdateCustomerEmailAddress.message).toBe('The provided credentials are invalid');
+            expect(requestUpdateCustomerEmailAddress.errorCode).toBe(ErrorCode.INVALID_CREDENTIALS_ERROR);
         });
 
-        it(
-            'throws if email address already in use',
-            assertThrowsWithMessage(async () => {
-                await shopClient.asUserWithCredentials(customer.emailAddress, PASSWORD);
-                const result = await adminClient.query<GetCustomer.Query, GetCustomer.Variables>(
-                    GET_CUSTOMER,
-                    { id: 'T_2' },
-                );
-                const otherCustomer = result.customer!;
+        it('return error result email address already in use', async () => {
+            await shopClient.asUserWithCredentials(customer.emailAddress, PASSWORD);
+            const result = await adminClient.query<GetCustomer.Query, GetCustomer.Variables>(GET_CUSTOMER, {
+                id: 'T_2',
+            });
+            const otherCustomer = result.customer!;
 
-                await shopClient.query<
-                    RequestUpdateEmailAddress.Mutation,
-                    RequestUpdateEmailAddress.Variables
-                >(REQUEST_UPDATE_EMAIL_ADDRESS, {
-                    password: PASSWORD,
-                    newEmailAddress: otherCustomer.emailAddress,
-                });
-            }, 'This email address is not available'),
-        );
+            const { requestUpdateCustomerEmailAddress } = await shopClient.query<
+                RequestUpdateEmailAddress.Mutation,
+                RequestUpdateEmailAddress.Variables
+            >(REQUEST_UPDATE_EMAIL_ADDRESS, {
+                password: PASSWORD,
+                newEmailAddress: otherCustomer.emailAddress,
+            });
+            successErrorGuard.assertErrorResult(requestUpdateCustomerEmailAddress);
+
+            expect(requestUpdateCustomerEmailAddress.message).toBe('The email address is not available.');
+            expect(requestUpdateCustomerEmailAddress.errorCode).toBe(ErrorCode.EMAIL_ADDRESS_CONFLICT_ERROR);
+        });
 
         it('triggers event with token', async () => {
             await shopClient.asUserWithCredentials(customer.emailAddress, PASSWORD);
@@ -412,30 +626,32 @@ describe('Shop auth & accounts', () => {
         });
 
         it('cannot login with new email address before verification', async () => {
-            try {
-                await shopClient.asUserWithCredentials(NEW_EMAIL_ADDRESS, PASSWORD);
-                fail('should have thrown');
-            } catch (err) {
-                expect(getErrorCode(err)).toBe('UNAUTHORIZED');
-            }
+            const result = await shopClient.asUserWithCredentials(NEW_EMAIL_ADDRESS, PASSWORD);
+
+            expect(result.errorCode).toBe(ErrorCode.INVALID_CREDENTIALS_ERROR);
         });
 
-        it(
-            'throws with bad token',
-            assertThrowsWithMessage(async () => {
-                await shopClient.query<UpdateEmailAddress.Mutation, UpdateEmailAddress.Variables>(
-                    UPDATE_EMAIL_ADDRESS,
-                    { token: 'bad token' },
-                );
-            }, 'Identifier change token not recognized'),
-        );
+        it('return error result for bad token', async () => {
+            const { updateCustomerEmailAddress } = await shopClient.query<
+                UpdateEmailAddress.Mutation,
+                UpdateEmailAddress.Variables
+            >(UPDATE_EMAIL_ADDRESS, { token: 'bad token' });
+            successErrorGuard.assertErrorResult(updateCustomerEmailAddress);
+
+            expect(updateCustomerEmailAddress.message).toBe('Identifier change token not recognized');
+            expect(updateCustomerEmailAddress.errorCode).toBe(
+                ErrorCode.IDENTIFIER_CHANGE_TOKEN_INVALID_ERROR,
+            );
+        });
 
         it('verify the new email address', async () => {
-            const result = await shopClient.query<UpdateEmailAddress.Mutation, UpdateEmailAddress.Variables>(
-                UPDATE_EMAIL_ADDRESS,
-                { token: emailUpdateToken },
-            );
-            expect(result.updateCustomerEmailAddress).toBe(true);
+            const { updateCustomerEmailAddress } = await shopClient.query<
+                UpdateEmailAddress.Mutation,
+                UpdateEmailAddress.Variables
+            >(UPDATE_EMAIL_ADDRESS, { token: emailUpdateToken });
+            successErrorGuard.assertSuccess(updateCustomerEmailAddress);
+
+            expect(updateCustomerEmailAddress.success).toBe(true);
 
             expect(sendEmailFn).toHaveBeenCalled();
             expect(sendEmailFn.mock.calls[0][0] instanceof IdentifierChangeEvent).toBe(true);
@@ -449,12 +665,38 @@ describe('Shop auth & accounts', () => {
         });
 
         it('cannot login with old email address after verification', async () => {
-            try {
-                await shopClient.asUserWithCredentials(customer.emailAddress, PASSWORD);
-                fail('should have thrown');
-            } catch (err) {
-                expect(getErrorCode(err)).toBe('UNAUTHORIZED');
-            }
+            const result = await shopClient.asUserWithCredentials(customer.emailAddress, PASSWORD);
+
+            expect(result.errorCode).toBe(ErrorCode.INVALID_CREDENTIALS_ERROR);
+        });
+
+        it('customer history for email update', async () => {
+            const result = await adminClient.query<GetCustomerHistory.Query, GetCustomerHistory.Variables>(
+                GET_CUSTOMER_HISTORY,
+                {
+                    id: customer.id,
+                    options: {
+                        skip: 5,
+                    },
+                },
+            );
+
+            expect(result.customer?.history.items.map(pick(['type', 'data']))).toEqual([
+                {
+                    type: HistoryEntryType.CUSTOMER_EMAIL_UPDATE_REQUESTED,
+                    data: {
+                        newEmailAddress: 'new@address.com',
+                        oldEmailAddress: 'hayden.zieme12@hotmail.com',
+                    },
+                },
+                {
+                    type: HistoryEntryType.CUSTOMER_EMAIL_UPDATE_VERIFIED,
+                    data: {
+                        newEmailAddress: 'new@address.com',
+                        oldEmailAddress: 'hayden.zieme12@hotmail.com',
+                    },
+                },
+            ]);
         });
     });
 
@@ -499,9 +741,7 @@ describe('Shop auth & accounts', () => {
 
         const role = roleResult.createRole;
 
-        const identifier = `${code}@${Math.random()
-            .toString(16)
-            .substr(2, 8)}`;
+        const identifier = `${code}@${Math.random().toString(16).substr(2, 8)}`;
         const password = `test`;
 
         const adminResult = await shopClient.query<
@@ -559,64 +799,79 @@ describe('Expiring tokens', () => {
         await server.destroy();
     });
 
-    it(
-        'attempting to verify after token has expired throws',
-        assertThrowsWithMessage(async () => {
-            const verificationTokenPromise = getVerificationTokenPromise();
-            const input: RegisterCustomerInput = {
-                firstName: 'Barry',
-                lastName: 'Wallace',
-                emailAddress: 'barry.wallace@test.com',
-            };
-            const result = await shopClient.query<Register.Mutation, Register.Variables>(REGISTER_ACCOUNT, {
+    it('attempting to verify after token has expired throws', async () => {
+        const verificationTokenPromise = getVerificationTokenPromise();
+        const input: RegisterCustomerInput = {
+            firstName: 'Barry',
+            lastName: 'Wallace',
+            emailAddress: 'barry.wallace@test.com',
+        };
+        const { registerCustomerAccount } = await shopClient.query<Register.Mutation, Register.Variables>(
+            REGISTER_ACCOUNT,
+            {
                 input,
-            });
+            },
+        );
+        successErrorGuard.assertSuccess(registerCustomerAccount);
 
-            const verificationToken = await verificationTokenPromise;
+        const verificationToken = await verificationTokenPromise;
 
-            expect(result.registerCustomerAccount).toBe(true);
-            expect(sendEmailFn).toHaveBeenCalledTimes(1);
-            expect(verificationToken).toBeDefined();
+        expect(registerCustomerAccount.success).toBe(true);
+        expect(sendEmailFn).toHaveBeenCalledTimes(1);
+        expect(verificationToken).toBeDefined();
 
-            await new Promise(resolve => setTimeout(resolve, 3));
+        await new Promise(resolve => setTimeout(resolve, 3));
 
-            return shopClient.query(VERIFY_EMAIL, {
+        const { verifyCustomerAccount } = await shopClient.query<Verify.Mutation, Verify.Variables>(
+            VERIFY_EMAIL,
+            {
                 password: 'test',
                 token: verificationToken,
-            });
-        }, `Verification token has expired. Use refreshCustomerVerification to send a new token.`),
-    );
+            },
+        );
+        currentUserErrorGuard.assertErrorResult(verifyCustomerAccount);
 
-    it(
-        'attempting to reset password after token has expired throws',
-        assertThrowsWithMessage(async () => {
-            const { customer } = await adminClient.query<GetCustomer.Query, GetCustomer.Variables>(
-                GET_CUSTOMER,
-                { id: 'T_1' },
-            );
+        expect(verifyCustomerAccount.message).toBe(
+            `Verification token has expired. Use refreshCustomerVerification to send a new token.`,
+        );
+        expect(verifyCustomerAccount.errorCode).toBe(ErrorCode.VERIFICATION_TOKEN_EXPIRED_ERROR);
+    });
 
-            const passwordResetTokenPromise = getPasswordResetTokenPromise();
-            const result = await shopClient.query<
-                RequestPasswordReset.Mutation,
-                RequestPasswordReset.Variables
-            >(REQUEST_PASSWORD_RESET, {
-                identifier: customer!.emailAddress,
-            });
+    it('attempting to reset password after token has expired returns error result', async () => {
+        const { customer } = await adminClient.query<GetCustomer.Query, GetCustomer.Variables>(GET_CUSTOMER, {
+            id: 'T_1',
+        });
 
-            const passwordResetToken = await passwordResetTokenPromise;
+        const passwordResetTokenPromise = getPasswordResetTokenPromise();
+        const { requestPasswordReset } = await shopClient.query<
+            RequestPasswordReset.Mutation,
+            RequestPasswordReset.Variables
+        >(REQUEST_PASSWORD_RESET, {
+            identifier: customer!.emailAddress,
+        });
+        successErrorGuard.assertSuccess(requestPasswordReset);
 
-            expect(result.requestPasswordReset).toBe(true);
-            expect(sendEmailFn).toHaveBeenCalledTimes(1);
-            expect(passwordResetToken).toBeDefined();
+        const passwordResetToken = await passwordResetTokenPromise;
 
-            await new Promise(resolve => setTimeout(resolve, 3));
+        expect(requestPasswordReset.success).toBe(true);
+        expect(sendEmailFn).toHaveBeenCalledTimes(1);
+        expect(passwordResetToken).toBeDefined();
 
-            return shopClient.query<ResetPassword.Mutation, ResetPassword.Variables>(RESET_PASSWORD, {
+        await new Promise(resolve => setTimeout(resolve, 3));
+
+        const { resetPassword } = await shopClient.query<ResetPassword.Mutation, ResetPassword.Variables>(
+            RESET_PASSWORD,
+            {
                 password: 'test',
                 token: passwordResetToken,
-            });
-        }, `Password reset token has expired.`),
-    );
+            },
+        );
+
+        currentUserErrorGuard.assertErrorResult(resetPassword);
+
+        expect(resetPassword.message).toBe(`Password reset token has expired`);
+        expect(resetPassword.errorCode).toBe(ErrorCode.PASSWORD_RESET_TOKEN_EXPIRED_ERROR);
+    });
 });
 
 describe('Registration without email verification', () => {
@@ -646,19 +901,23 @@ describe('Registration without email verification', () => {
         await server.destroy();
     });
 
-    it(
-        'errors if no password is provided',
-        assertThrowsWithMessage(async () => {
-            const input: RegisterCustomerInput = {
-                firstName: 'Glen',
-                lastName: 'Beardsley',
-                emailAddress: userEmailAddress,
-            };
-            const result = await shopClient.query<Register.Mutation, Register.Variables>(REGISTER_ACCOUNT, {
+    it('Returns error result if no password is provided', async () => {
+        const input: RegisterCustomerInput = {
+            firstName: 'Glen',
+            lastName: 'Beardsley',
+            emailAddress: userEmailAddress,
+        };
+        const { registerCustomerAccount } = await shopClient.query<Register.Mutation, Register.Variables>(
+            REGISTER_ACCOUNT,
+            {
                 input,
-            });
-        }, 'A password must be provided when `authOptions.requireVerification` is set to "false"'),
-    );
+            },
+        );
+        successErrorGuard.assertErrorResult(registerCustomerAccount);
+
+        expect(registerCustomerAccount.message).toBe('A password must be provided.');
+        expect(registerCustomerAccount.errorCode).toBe(ErrorCode.MISSING_PASSWORD_ERROR);
+    });
 
     it('register a new account with password', async () => {
         const input: RegisterCustomerInput = {
@@ -667,11 +926,15 @@ describe('Registration without email verification', () => {
             emailAddress: userEmailAddress,
             password: 'test',
         };
-        const result = await shopClient.query<Register.Mutation, Register.Variables>(REGISTER_ACCOUNT, {
-            input,
-        });
+        const { registerCustomerAccount } = await shopClient.query<Register.Mutation, Register.Variables>(
+            REGISTER_ACCOUNT,
+            {
+                input,
+            },
+        );
+        successErrorGuard.assertSuccess(registerCustomerAccount);
 
-        expect(result.registerCustomerAccount).toBe(true);
+        expect(registerCustomerAccount.success).toBe(true);
         expect(sendEmailFn).not.toHaveBeenCalled();
     });
 
@@ -733,8 +996,9 @@ describe('Updating email address without email verification', () => {
             password: 'test',
             newEmailAddress: NEW_EMAIL_ADDRESS,
         });
+        successErrorGuard.assertSuccess(requestUpdateCustomerEmailAddress);
 
-        expect(requestUpdateCustomerEmailAddress).toBe(true);
+        expect(requestUpdateCustomerEmailAddress.success).toBe(true);
         expect(sendEmailFn).toHaveBeenCalledTimes(1);
         expect(sendEmailFn.mock.calls[0][0] instanceof IdentifierChangeEvent).toBe(true);
 
@@ -746,7 +1010,7 @@ describe('Updating email address without email verification', () => {
 function getVerificationTokenPromise(): Promise<string> {
     return new Promise<any>(resolve => {
         sendEmailFn.mockImplementation((event: AccountRegistrationEvent) => {
-            resolve(event.user.verificationToken);
+            resolve(event.user.getNativeAuthenticationMethod().verificationToken);
         });
     });
 }
@@ -754,7 +1018,7 @@ function getVerificationTokenPromise(): Promise<string> {
 function getPasswordResetTokenPromise(): Promise<string> {
     return new Promise<any>(resolve => {
         sendEmailFn.mockImplementation((event: PasswordResetEvent) => {
-            resolve(event.user.passwordResetToken);
+            resolve(event.user.getNativeAuthenticationMethod().passwordResetToken);
         });
     });
 }
@@ -765,7 +1029,12 @@ function getEmailUpdateTokenPromise(): Promise<{
 }> {
     return new Promise(resolve => {
         sendEmailFn.mockImplementation((event: IdentifierChangeRequestEvent) => {
-            resolve(pick(event.user, ['identifierChangeToken', 'pendingIdentifier']));
+            resolve(
+                pick(event.user.getNativeAuthenticationMethod(), [
+                    'identifierChangeToken',
+                    'pendingIdentifier',
+                ]),
+            );
         });
     });
 }

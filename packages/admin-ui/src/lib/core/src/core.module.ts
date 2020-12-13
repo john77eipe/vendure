@@ -4,14 +4,13 @@ import { NgModule } from '@angular/core';
 import { BrowserModule } from '@angular/platform-browser';
 import { BrowserAnimationsModule } from '@angular/platform-browser/animations';
 import { TranslateCompiler, TranslateLoader, TranslateModule } from '@ngx-translate/core';
-import { MESSAGE_FORMAT_CONFIG, MessageFormatConfig } from 'ngx-translate-messageformat-compiler';
+import { MessageFormatConfig, MESSAGE_FORMAT_CONFIG } from 'ngx-translate-messageformat-compiler';
 
 import { getAppConfig } from './app.config';
 import { getDefaultUiLanguage } from './common/utilities/get-default-ui-language';
 import { AppShellComponent } from './components/app-shell/app-shell.component';
 import { BreadcrumbComponent } from './components/breadcrumb/breadcrumb.component';
 import { ChannelSwitcherComponent } from './components/channel-switcher/channel-switcher.component';
-import { JobQueueLinkComponent } from './components/job-queue-link/job-queue-link.component';
 import { MainNavComponent } from './components/main-nav/main-nav.component';
 import { NotificationComponent } from './components/notification/notification.component';
 import { OverlayHostComponent } from './components/overlay-host/overlay-host.component';
@@ -22,6 +21,7 @@ import { CustomHttpTranslationLoader } from './providers/i18n/custom-http-loader
 import { InjectableTranslateMessageFormatCompiler } from './providers/i18n/custom-message-format-compiler';
 import { I18nService } from './providers/i18n/i18n.service';
 import { LocalStorageService } from './providers/local-storage/local-storage.service';
+import { registerDefaultFormInputs } from './shared/dynamic-form-inputs/register-dynamic-input-components';
 import { SharedModule } from './shared/shared.module';
 
 @NgModule({
@@ -39,7 +39,7 @@ import { SharedModule } from './shared/shared.module';
             compiler: { provide: TranslateCompiler, useClass: InjectableTranslateMessageFormatCompiler },
         }),
     ],
-    providers: [{ provide: MESSAGE_FORMAT_CONFIG, useFactory: getLocales }],
+    providers: [{ provide: MESSAGE_FORMAT_CONFIG, useFactory: getLocales }, registerDefaultFormInputs()],
     exports: [SharedModule, OverlayHostComponent],
     declarations: [
         AppShellComponent,
@@ -49,7 +49,6 @@ import { SharedModule } from './shared/shared.module';
         OverlayHostComponent,
         NotificationComponent,
         UiLanguageSwitcherDialogComponent,
-        JobQueueLinkComponent,
         ChannelSwitcherComponent,
     ],
 })
@@ -66,7 +65,7 @@ export class CoreModule {
         if (!availableLanguages.includes(defaultLanguage)) {
             throw new Error(
                 `The defaultLanguage "${defaultLanguage}" must be one of the availableLanguages [${availableLanguages
-                    .map((l) => `"${l}"`)
+                    .map(l => `"${l}"`)
                     .join(', ')}]`,
             );
         }
@@ -95,7 +94,7 @@ export function HttpLoaderFactory(http: HttpClient, location: PlatformLocation) 
 export function getLocales(): MessageFormatConfig {
     const locales = getAppConfig().availableLanguages;
     const defaultLanguage = getDefaultUiLanguage();
-    const localesWithoutDefault = locales.filter((l) => l !== defaultLanguage);
+    const localesWithoutDefault = locales.filter(l => l !== defaultLanguage);
     return {
         locales: [defaultLanguage, ...localesWithoutDefault],
     };

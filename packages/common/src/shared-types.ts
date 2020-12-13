@@ -104,12 +104,49 @@ export type CustomFieldType = 'string' | 'localeString' | 'int' | 'float' | 'boo
  * 1. How the argument form field is rendered in the admin-ui
  * 2. The JavaScript type into which the value is coerced before being passed to the business logic.
  *
- * @docsCategory common
- * @docsPage Configurable Operations
+ * @docsCategory ConfigurableOperationDef
  */
-export type ConfigArgType = 'string' | 'int' | 'float' | 'boolean' | 'datetime' | 'facetValueIds';
+export type ConfigArgType = 'string' | 'int' | 'float' | 'boolean' | 'datetime' | 'ID';
 
-export type ConfigArgSubset<T extends ConfigArgType> = T;
+/**
+ * @description
+ * The ids of the default form input components that ship with the
+ * Admin UI.
+ *
+ * @docsCategory ConfigurableOperationDef
+ */
+export type DefaultFormComponentId =
+    | 'boolean-form-input'
+    | 'currency-form-input'
+    | 'date-form-input'
+    | 'facet-value-form-input'
+    | 'number-form-input'
+    | 'select-form-input'
+    | 'product-selector-form-input'
+    | 'customer-group-form-input'
+    | 'text-form-input'
+    | 'password-form-input';
+
+/**
+ * @description
+ * Used to defined the expected arguments for a given default form input component.
+ *
+ * @docsCategory ConfigurableOperationDef
+ */
+type DefaultFormConfigHash = {
+    'date-form-input': { min?: string; max?: string; yearRange?: number };
+    'number-form-input': { min?: number; max?: number; step?: number; prefix?: string; suffix?: string };
+    'select-form-input': { options?: Array<{ value: string; label?: string }> };
+    'boolean-form-input': {};
+    'currency-form-input': {};
+    'facet-value-form-input': {};
+    'product-selector-form-input': {};
+    'customer-group-form-input': {};
+    'text-form-input': {};
+    'password-form-input': {};
+};
+
+export type DefaultFormComponentConfig<T extends DefaultFormComponentId> = DefaultFormConfigHash[T];
 
 export type CustomFieldsObject = { [key: string]: any };
 
@@ -180,6 +217,14 @@ export interface AdminUiConfig {
      * @default [LanguageCode.en, LanguageCode.es]
      */
     availableLanguages: LanguageCode[];
+    /**
+     * @description
+     * If you are using an external {@link AuthenticationStrategy} for the Admin API, you can configure
+     * a custom URL for the login page with this option. On logging out or redirecting an unauthenticated
+     * user, the Admin UI app will redirect the user to this URL rather than the default username/password
+     * screen.
+     */
+    loginUrl?: string;
 }
 
 /**

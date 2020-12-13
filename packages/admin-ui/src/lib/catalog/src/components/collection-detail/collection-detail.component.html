@@ -45,11 +45,8 @@
                         [vdrDisabled]="!('UpdateCatalog' | hasPermission)"
                     />
                     <label class="visible-toggle">
-                        {{
-                            detailForm.value.visible
-                                ? ('catalog.public' | translate)
-                                : ('catalog.private' | translate)
-                        }}
+                        <ng-container *ngIf="detailForm.value.visible; else private">{{ 'catalog.public' | translate }}</ng-container>
+                        <ng-template #private>{{ 'catalog.private' | translate }}</ng-template>
                     </label>
                 </clr-toggle-wrapper>
             </vdr-form-field>
@@ -59,6 +56,20 @@
                     type="text"
                     formControlName="name"
                     [readonly]="!('UpdateCatalog' | hasPermission)"
+                    (input)="updateSlug($event.target.value)"
+                />
+            </vdr-form-field>
+            <vdr-form-field
+                [label]="'catalog.slug' | translate"
+                for="slug"
+                [errors]="{ pattern: ('catalog.slug-pattern-error' | translate) }"
+            >
+                <input
+                    id="slug"
+                    type="text"
+                    formControlName="slug"
+                    [readonly]="!('UpdateCatalog' | hasPermission)"
+                    pattern="[a-z0-9_-]+"
                 />
             </vdr-form-field>
             <vdr-rich-text-editor
@@ -93,12 +104,10 @@
             <ng-container *ngFor="let filter of filters; index as i">
                 <vdr-configurable-input
                     (remove)="removeFilter($event)"
-                    [facets]="facets$ | async"
                     [operation]="filter"
                     [operationDefinition]="getFilterDefinition(filter)"
                     [formControlName]="i"
                     [readonly]="!('UpdateCatalog' | hasPermission)"
-                    [activeChannel]="activeChannel$ | async"
                 ></vdr-configurable-input>
             </ng-container>
 

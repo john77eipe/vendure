@@ -98,6 +98,9 @@
     em {
         color: #776e71;
     }
+    a:link, a:visited {
+        color: $brand-color;
+    }
 }
 
 /**
@@ -129,6 +132,7 @@
     border-left: 2px solid $gray-200;
     padding-left: 6px;
     margin-left: -8px;
+    margin-bottom: 32px;
     .tab-controls {
         button.tab-control {
             color: $gray-600;

@@ -3,6 +3,9 @@
         <div class="flex clr-align-items-center">
             <vdr-entity-info [entity]="entity$ | async"></vdr-entity-info>
             <vdr-customer-status-label [customer]="entity$ | async"></vdr-customer-status-label>
+            <div class="last-login" *ngIf="(entity$ | async)?.user?.lastLogin as lastLogin" [title]="lastLogin | date:'medium'">
+                {{ 'customer.last-login' | translate }}: {{ lastLogin | timeAgo }}
+            </div>
         </div>
     </vdr-ab-left>
 
@@ -10,7 +13,7 @@
         <vdr-action-bar-items locationId="customer-detail"></vdr-action-bar-items>
         <button
             class="btn btn-primary"
-            *ngIf="(isNew$ | async); else updateButton"
+            *ngIf="isNew$ | async; else updateButton"
             (click)="create()"
             [disabled]="!(addressDefaultsUpdated || (detailForm.valid && detailForm.dirty))"
         >
@@ -53,7 +56,14 @@
     >
         <input id="emailAddress" type="text" formControlName="emailAddress" />
     </vdr-form-field>
-    <vdr-form-field [label]="'customer.password' | translate" for="password" *ngIf="(isNew$ | async)">
+    <vdr-form-field
+           [label]="'customer.phone-number' | translate"
+           for="phoneNumber"
+           [readOnlyToggle]="!(isNew$ | async)"
+       >
+           <input id="phoneNumber" type="text" formControlName="phoneNumber" />
+       </vdr-form-field>
+    <vdr-form-field [label]="'customer.password' | translate" for="password" *ngIf="isNew$ | async">
         <input id="password" type="password" formControlName="password" />
     </vdr-form-field>
 
@@ -70,6 +80,28 @@
     </section>
 </form>
 
+<div class="groups" *ngIf="(entity$ | async)?.groups as groups">
+    <label class="clr-control-label">{{ 'customer.customer-groups' | translate }}</label>
+    <ng-container *ngIf="groups.length; else noGroups">
+        <vdr-chip
+            *ngFor="let group of groups"
+            [colorFrom]="group.id"
+            icon="times"
+            (iconClick)="removeFromGroup(group)"
+            >{{ group.name }}</vdr-chip
+        >
+    </ng-container>
+    <ng-template #noGroups>
+        {{ 'customer.not-a-member-of-any-groups' | translate }}
+    </ng-template>
+    <div>
+        <button class="btn btn-sm btn-secondary" (click)="addToGroup()">
+            <clr-icon shape="plus"></clr-icon>
+            {{ 'customer.add-customer-to-group' | translate }}
+        </button>
+    </div>
+</div>
+
 <div class="clr-row" *ngIf="!(isNew$ | async)">
     <div class="clr-col-md-4">
         <h3>{{ 'customer.addresses' | translate }}</h3>
@@ -79,6 +111,7 @@
             [isDefaultBilling]="defaultBillingAddressId === addressForm.value.id"
             [isDefaultShipping]="defaultShippingAddressId === addressForm.value.id"
             [addressForm]="addressForm"
+            [customFields]="addressCustomFields"
             (setAsDefaultBilling)="setDefaultBillingAddressId($event)"
             (setAsDefaultShipping)="setDefaultShippingAddressId($event)"
         ></vdr-address-card>
@@ -117,5 +150,16 @@
                 </td>
             </ng-template>
         </vdr-data-table>
+    </div>
+</div>
+<div class="clr-row" *ngIf="!(isNew$ | async)">
+    <div class="clr-col-md-6">
+        <vdr-customer-history
+            [customer]="entity$ | async"
+            [history]="history$ | async"
+            (addNote)="addNoteToCustomer($event)"
+            (updateNote)="updateNote($event)"
+            (deleteNote)="deleteNote($event)"
+        ></vdr-customer-history>
     </div>
 </div>

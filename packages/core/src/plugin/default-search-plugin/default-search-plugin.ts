@@ -1,6 +1,6 @@
 import { SearchReindexResponse } from '@vendure/common/lib/generated-types';
 import { ID } from '@vendure/common/lib/shared-types';
-import { buffer, debounceTime, filter, map } from 'rxjs/operators';
+import { buffer, debounceTime, delay, filter, map } from 'rxjs/operators';
 
 import { idsAreEqual } from '../../common/utils';
 import { EventBus } from '../../event-bus/event-bus';
@@ -41,9 +41,9 @@ export interface DefaultSearchReindexResponse extends SearchReindexResponse {
  *
  * @example
  * ```ts
- * import { DefaultSearchPlugin } from '\@vendure/core';
+ * import { DefaultSearchPlugin, VendureConfig } from '\@vendure/core';
  *
- * const config: VendureConfig = {
+ * export const config: VendureConfig = {
  *   // Add an instance of the plugin to the plugins array
  *   plugins: [
  *     DefaultSearchPlugin,
@@ -69,21 +69,21 @@ export class DefaultSearchPlugin implements OnVendureBootstrap {
     async onVendureBootstrap() {
         this.searchIndexService.initJobQueue();
 
-        this.eventBus.ofType(ProductEvent).subscribe((event) => {
+        this.eventBus.ofType(ProductEvent).subscribe(event => {
             if (event.type === 'deleted') {
                 return this.searchIndexService.deleteProduct(event.ctx, event.product);
             } else {
                 return this.searchIndexService.updateProduct(event.ctx, event.product);
             }
         });
-        this.eventBus.ofType(ProductVariantEvent).subscribe((event) => {
+        this.eventBus.ofType(ProductVariantEvent).subscribe(event => {
             if (event.type === 'deleted') {
                 return this.searchIndexService.deleteVariant(event.ctx, event.variants);
             } else {
                 return this.searchIndexService.updateVariants(event.ctx, event.variants);
             }
         });
-        this.eventBus.ofType(AssetEvent).subscribe((event) => {
+        this.eventBus.ofType(AssetEvent).subscribe(event => {
             if (event.type === 'updated') {
                 return this.searchIndexService.updateAsset(event.ctx, event.asset);
             }
@@ -91,7 +91,7 @@ export class DefaultSearchPlugin implements OnVendureBootstrap {
                 return this.searchIndexService.deleteAsset(event.ctx, event.asset);
             }
         });
-        this.eventBus.ofType(ProductChannelEvent).subscribe((event) => {
+        this.eventBus.ofType(ProductChannelEvent).subscribe(event => {
             if (event.type === 'assigned') {
                 return this.searchIndexService.assignProductToChannel(
                     event.ctx,
@@ -112,22 +112,28 @@ export class DefaultSearchPlugin implements OnVendureBootstrap {
         collectionModification$
             .pipe(
                 buffer(closingNotifier$),
-                filter((events) => 0 < events.length),
-                map((events) => ({
+                filter(events => 0 < events.length),
+                map(events => ({
                     ctx: events[0].ctx,
                     ids: events.reduce((ids, e) => [...ids, ...e.productVariantIds], [] as ID[]),
                 })),
-                filter((e) => 0 < e.ids.length),
+                filter(e => 0 < e.ids.length),
             )
-            .subscribe((events) => {
+            .subscribe(events => {
                 return this.searchIndexService.updateVariantsById(events.ctx, events.ids);
             });
 
-        this.eventBus.ofType(TaxRateModificationEvent).subscribe((event) => {
-            const defaultTaxZone = event.ctx.channel.defaultTaxZone;
-            if (defaultTaxZone && idsAreEqual(defaultTaxZone.id, event.taxRate.zone.id)) {
-                return this.searchIndexService.reindex(event.ctx);
-            }
-        });
+        this.eventBus
+            .ofType(TaxRateModificationEvent)
+            // The delay prevents a "TransactionNotStartedError" (in SQLite/sqljs) by allowing any existing
+            // transactions to complete before a new job is added to the queue (assuming the SQL-based
+            // JobQueueStrategy).
+            .pipe(delay(1))
+            .subscribe(event => {
+                const defaultTaxZone = event.ctx.channel.defaultTaxZone;
+                if (defaultTaxZone && idsAreEqual(defaultTaxZone.id, event.taxRate.zone.id)) {
+                    return this.searchIndexService.reindex(event.ctx);
+                }
+            });
     }
 }

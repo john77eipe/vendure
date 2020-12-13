@@ -1,7 +1,10 @@
 import { Column, Entity, OneToMany } from 'typeorm';
 
 import { DeepPartial } from '../../../../common/lib/shared-types';
+import { HasCustomFields } from '../../config/custom-field/custom-field-types';
+import { FulfillmentState } from '../../service/helpers/fulfillment-state-machine/fulfillment-state';
 import { VendureEntity } from '../base/base.entity';
+import { CustomFulfillmentFields } from '../custom-entity-fields';
 import { OrderItem } from '../order-item/order-item.entity';
 
 /**
@@ -12,10 +15,12 @@ import { OrderItem } from '../order-item/order-item.entity';
  * @docsCategory entities
  */
 @Entity()
-export class Fulfillment extends VendureEntity {
+export class Fulfillment extends VendureEntity implements HasCustomFields {
     constructor(input?: DeepPartial<Fulfillment>) {
         super(input);
     }
+
+    @Column('varchar') state: FulfillmentState;
 
     @Column({ default: '' })
     trackingCode: string;
@@ -25,4 +30,7 @@ export class Fulfillment extends VendureEntity {
 
     @OneToMany(type => OrderItem, orderItem => orderItem.fulfillment)
     orderItems: OrderItem[];
+
+    @Column(type => CustomFulfillmentFields)
+    customFields: CustomFulfillmentFields;
 }

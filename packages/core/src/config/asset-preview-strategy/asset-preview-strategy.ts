@@ -1,5 +1,8 @@
 import { Stream } from 'stream';
 
+import { RequestContext } from '../../api/common/request-context';
+import { InjectableStrategy } from '../../common/types/injectable-strategy';
+
 /**
  * @description
  * The AssetPreviewStrategy determines how preview images for assets are created. For image
@@ -11,6 +14,6 @@ import { Stream } from 'stream';
  *
  * @docsCategory assets
  */
-export interface AssetPreviewStrategy {
-    generatePreviewImage(mimeType: string, data: Buffer): Promise<Buffer>;
+export interface AssetPreviewStrategy extends InjectableStrategy {
+    generatePreviewImage(ctx: RequestContext, mimeType: string, data: Buffer): Promise<Buffer>;
 }

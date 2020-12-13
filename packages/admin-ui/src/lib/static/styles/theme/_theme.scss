@@ -21,6 +21,10 @@ a:focus, button:focus {
     flex: 1;
 }
 
+.align-center {
+    align-items: center;
+}
+
 .btn-link.btn-warning {
     color: $color-warning-500;
 
@@ -70,5 +74,5 @@ table tr .dropdown-menu button.dropdown-item {
 }
 
 .cdk-overlay-container {
-    z-index: 1040;
+    z-index: 1060;
 }

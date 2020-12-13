@@ -1,3 +1,4 @@
+import { SUPER_ADMIN_USER_IDENTIFIER, SUPER_ADMIN_USER_PASSWORD } from '@vendure/common/lib/shared-constants';
 import fs from 'fs-extra';
 import Handlebars from 'handlebars';
 import path from 'path';
@@ -26,7 +27,8 @@ export async function gatherUserResponses(root: string): Promise<UserResponses> 
                 name: 'dbType',
                 message: 'Which database are you using?',
                 choices: [
-                    { title: 'MySQL / MariaDB', value: 'mysql' },
+                    { title: 'MySQL', value: 'mysql' },
+                    { title: 'MariaDB', value: 'mariadb' },
                     { title: 'Postgres', value: 'postgres' },
                     { title: 'SQLite', value: 'sqlite' },
                     { title: 'SQL.js', value: 'sqljs' },
@@ -40,7 +42,7 @@ export async function gatherUserResponses(root: string): Promise<UserResponses> 
                 type: (() => (dbType === 'sqlite' || dbType === 'sqljs' ? null : 'text')) as any,
                 name: 'dbHost',
                 message: `What's the database host address?`,
-                initial: '192.168.99.100',
+                initial: 'localhost',
             },
             {
                 type: (() => (dbType === 'sqlite' || dbType === 'sqljs' ? null : 'text')) as any,
@@ -69,7 +71,10 @@ export async function gatherUserResponses(root: string): Promise<UserResponses> 
                 type: 'select',
                 name: 'language',
                 message: 'Which programming language will you be using?',
-                choices: [{ title: 'TypeScript', value: 'ts' }, { title: 'JavaScript', value: 'js' }],
+                choices: [
+                    { title: 'TypeScript', value: 'ts' },
+                    { title: 'JavaScript', value: 'js' },
+                ],
                 initial: 0 as any,
             },
             {
@@ -79,6 +84,18 @@ export async function gatherUserResponses(root: string): Promise<UserResponses> 
                 initial: true,
                 active: 'yes',
                 inactive: 'no',
+            },
+            {
+                type: 'text',
+                name: 'superadminIdentifier',
+                message: 'What identifier do you want to use for the superadmin user?',
+                initial: SUPER_ADMIN_USER_IDENTIFIER,
+            },
+            {
+                type: 'text',
+                name: 'superadminPassword',
+                message: 'What password do you want to use for the superadmin user?',
+                initial: SUPER_ADMIN_USER_PASSWORD,
             },
         ],
         {
@@ -110,6 +127,8 @@ export async function gatherUserResponses(root: string): Promise<UserResponses> 
         usingTs: answers.language === 'ts',
         dbType: answers.dbType,
         populateProducts: answers.populateProducts,
+        superadminIdentifier: answers.superadminIdentifier,
+        superadminPassword: answers.superadminPassword,
     };
 }
 
@@ -126,6 +145,8 @@ export async function gatherCiUserResponses(root: string): Promise<UserResponses
         dbPassword: '',
         language: 'ts',
         populateProducts: true,
+        superadminIdentifier: SUPER_ADMIN_USER_IDENTIFIER,
+        superadminPassword: SUPER_ADMIN_USER_PASSWORD,
     };
     const {
         indexSource,
@@ -143,6 +164,8 @@ export async function gatherCiUserResponses(root: string): Promise<UserResponses
         usingTs: ciAnswers.language === 'ts',
         dbType: ciAnswers.dbType,
         populateProducts: ciAnswers.populateProducts,
+        superadminIdentifier: ciAnswers.superadminIdentifier,
+        superadminPassword: ciAnswers.superadminPassword,
     };
 }
 
@@ -163,14 +186,12 @@ async function generateSources(
 
     const templateContext = {
         ...answers,
+        dbType: answers.dbType === 'sqlite' ? 'better-sqlite3' : answers.dbType,
         name: path.basename(root),
         isTs: answers.language === 'ts',
         isSQLite: answers.dbType === 'sqlite',
         isSQLjs: answers.dbType === 'sqljs',
         requiresConnection: answers.dbType !== 'sqlite' && answers.dbType !== 'sqljs',
-        sessionSecret: Math.random()
-            .toString(36)
-            .substr(3),
     };
     const configTemplate = await fs.readFile(assetPath('vendure-config.hbs'), 'utf-8');
     const configSource = Handlebars.compile(configTemplate)(templateContext);
@@ -188,6 +209,7 @@ async function generateSources(
 function defaultDBPort(dbType: DbType): number {
     switch (dbType) {
         case 'mysql':
+        case 'mariadb':
             return 3306;
         case 'postgres':
             return 5432;

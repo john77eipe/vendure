@@ -5,16 +5,12 @@ import { GraphQLResolveInfo } from 'graphql';
 
 import { idsAreEqual } from '../../common/utils';
 import { ConfigService } from '../../config/config.service';
+import { CachedSession, CachedSessionUser } from '../../config/session-cache/session-cache-strategy';
 import { Channel } from '../../entity/channel/channel.entity';
-import { AuthenticatedSession } from '../../entity/session/authenticated-session.entity';
-import { Session } from '../../entity/session/session.entity';
-import { User } from '../../entity/user/user.entity';
 import { ChannelService } from '../../service/services/channel.service';
 
 import { getApiType } from './get-api-type';
 import { RequestContext } from './request-context';
-
-export const REQUEST_CONTEXT_KEY = 'vendureRequestContext';
 
 /**
  * Creates new RequestContext instances.
@@ -30,7 +26,7 @@ export class RequestContextService {
         req: Request,
         info?: GraphQLResolveInfo,
         requiredPermissions?: Permission[],
-        session?: Session,
+        session?: CachedSession,
     ): Promise<RequestContext> {
         const channelToken = this.getChannelToken(req);
         const channel = this.channelService.getChannelFromToken(channelToken);
@@ -38,11 +34,12 @@ export class RequestContextService {
 
         const hasOwnerPermission = !!requiredPermissions && requiredPermissions.includes(Permission.Owner);
         const languageCode = this.getLanguageCode(req, channel);
-        const user = session && (session as AuthenticatedSession).user;
+        const user = session && session.user;
         const isAuthorized = this.userHasRequiredPermissionsOnChannel(requiredPermissions, channel, user);
         const authorizedAsOwnerOnly = !isAuthorized && hasOwnerPermission;
         const translationFn = (req as any).t;
         return new RequestContext({
+            req,
             apiType,
             channel,
             languageCode,
@@ -53,8 +50,8 @@ export class RequestContextService {
         });
     }
 
-    private getChannelToken(req: Request): string {
-        const tokenKey = this.configService.channelTokenKey;
+    private getChannelToken(req: Request<any, any, any, { [key: string]: any }>): string {
+        const tokenKey = this.configService.apiOptions.channelTokenKey;
         let channelToken = '';
 
         if (req && req.query && req.query[tokenKey]) {
@@ -67,28 +64,25 @@ export class RequestContextService {
 
     private getLanguageCode(req: Request, channel: Channel): LanguageCode | undefined {
         return (
-            (req.query && req.query.languageCode) ??
+            (req.query && (req.query.languageCode as LanguageCode)) ??
             channel.defaultLanguageCode ??
             this.configService.defaultLanguageCode
         );
     }
 
-    private isAuthenticatedSession(session?: Session): session is AuthenticatedSession {
-        return !!session && !!(session as AuthenticatedSession).user;
-    }
-
     private userHasRequiredPermissionsOnChannel(
         permissions: Permission[] = [],
         channel?: Channel,
-        user?: User,
+        user?: CachedSessionUser,
     ): boolean {
         if (!user || !channel) {
             return false;
         }
-        const permissionsOnChannel = user.roles
-            .filter((role) => role.channels.find((c) => idsAreEqual(c.id, channel.id)))
-            .reduce((output, role) => [...output, ...role.permissions], [] as Permission[]);
-        return this.arraysIntersect(permissions, permissionsOnChannel);
+        const permissionsOnChannel = user.channelPermissions.find(c => idsAreEqual(c.id, channel.id));
+        if (permissionsOnChannel) {
+            return this.arraysIntersect(permissionsOnChannel.permissions, permissions);
+        }
+        return false;
     }
 
     /**

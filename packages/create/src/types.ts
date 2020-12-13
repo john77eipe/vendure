@@ -1,4 +1,4 @@
-export type DbType = 'mysql' | 'postgres' | 'sqlite' | 'sqljs' | 'mssql' | 'oracle';
+export type DbType = 'mysql' | 'mariadb' | 'postgres' | 'sqlite' | 'sqljs' | 'mssql' | 'oracle';
 
 export interface UserResponses {
     usingTs: boolean;
@@ -9,6 +9,8 @@ export interface UserResponses {
     configSource: string;
     migrationSource: string;
     readmeSource: string;
+    superadminIdentifier: string;
+    superadminPassword: string;
 }
 
 export type CliLogLevel = 'silent' | 'info' | 'verbose';

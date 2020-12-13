@@ -4,6 +4,7 @@ import {
     CancelOrder,
     CancelOrderInput,
     CreateFulfillment,
+    DeleteOrderNote,
     FulfillOrderInput,
     GetOrder,
     GetOrderHistory,
@@ -14,17 +15,28 @@ import {
     SettlePayment,
     SettleRefund,
     SettleRefundInput,
+    TransitionFulfillmentToState,
+    TransitionOrderToState,
+    UpdateOrderCustomFields,
+    UpdateOrderInput,
+    UpdateOrderNote,
+    UpdateOrderNoteInput,
 } from '../../common/generated-types';
 import {
     ADD_NOTE_TO_ORDER,
     CANCEL_ORDER,
     CREATE_FULFILLMENT,
+    DELETE_ORDER_NOTE,
     GET_ORDER,
     GET_ORDER_HISTORY,
     GET_ORDERS_LIST,
     REFUND_ORDER,
     SETTLE_PAYMENT,
     SETTLE_REFUND,
+    TRANSITION_FULFILLMENT_TO_STATE,
+    TRANSITION_ORDER_TO_STATE,
+    UPDATE_ORDER_CUSTOM_FIELDS,
+    UPDATE_ORDER_NOTE,
 } from '../definitions/order-definitions';
 
 import { BaseDataService } from './base-data.service';
@@ -61,13 +73,23 @@ export class OrderDataService {
         });
     }
 
-    createFullfillment(input: FulfillOrderInput) {
+    createFulfillment(input: FulfillOrderInput) {
         return this.baseDataService.mutate<CreateFulfillment.Mutation, CreateFulfillment.Variables>(
             CREATE_FULFILLMENT,
             {
                 input,
             },
         );
+    }
+
+    transitionFulfillmentToState(id: string, state: string) {
+        return this.baseDataService.mutate<
+            TransitionFulfillmentToState.Mutation,
+            TransitionFulfillmentToState.Variables
+        >(TRANSITION_FULFILLMENT_TO_STATE, {
+            id,
+            state,
+        });
     }
 
     cancelOrder(input: CancelOrderInput) {
@@ -95,5 +117,42 @@ export class OrderDataService {
                 input,
             },
         );
+    }
+
+    updateOrderNote(input: UpdateOrderNoteInput) {
+        return this.baseDataService.mutate<UpdateOrderNote.Mutation, UpdateOrderNote.Variables>(
+            UPDATE_ORDER_NOTE,
+            {
+                input,
+            },
+        );
+    }
+
+    deleteOrderNote(id: string) {
+        return this.baseDataService.mutate<DeleteOrderNote.Mutation, DeleteOrderNote.Variables>(
+            DELETE_ORDER_NOTE,
+            {
+                id,
+            },
+        );
+    }
+
+    transitionToState(id: string, state: string) {
+        return this.baseDataService.mutate<TransitionOrderToState.Mutation, TransitionOrderToState.Variables>(
+            TRANSITION_ORDER_TO_STATE,
+            {
+                id,
+                state,
+            },
+        );
+    }
+
+    updateOrderCustomFields(input: UpdateOrderInput) {
+        return this.baseDataService.mutate<
+            UpdateOrderCustomFields.Mutation,
+            UpdateOrderCustomFields.Variables
+        >(UPDATE_ORDER_CUSTOM_FIELDS, {
+            input,
+        });
     }
 }

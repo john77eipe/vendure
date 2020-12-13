@@ -1,9 +1,12 @@
 import { ConfigurableOperation } from '@vendure/common/lib/generated-types';
 import { DeepPartial } from '@vendure/common/lib/shared-types';
-import { Column, Entity, JoinTable, ManyToMany } from 'typeorm';
+import { Column, Entity, JoinTable, ManyToMany, OneToMany } from 'typeorm';
 
+import { RequestContext } from '../../api/common/request-context';
 import { ChannelAware, SoftDeletable } from '../../common/types/common-types';
+import { LocaleString, Translatable, Translation } from '../../common/types/locale-types';
 import { getConfig } from '../../config/config-helpers';
+import { HasCustomFields } from '../../config/custom-field/custom-field-types';
 import {
     ShippingCalculationResult,
     ShippingCalculator,
@@ -11,7 +14,10 @@ import {
 import { ShippingEligibilityChecker } from '../../config/shipping-method/shipping-eligibility-checker';
 import { VendureEntity } from '../base/base.entity';
 import { Channel } from '../channel/channel.entity';
+import { CustomShippingMethodFields } from '../custom-entity-fields';
 import { Order } from '../order/order.entity';
+
+import { ShippingMethodTranslation } from './shipping-method-translation.entity';
 
 /**
  * @description
@@ -24,7 +30,9 @@ import { Order } from '../order/order.entity';
  * @docsCategory entities
  */
 @Entity()
-export class ShippingMethod extends VendureEntity implements ChannelAware, SoftDeletable {
+export class ShippingMethod
+    extends VendureEntity
+    implements ChannelAware, SoftDeletable, HasCustomFields, Translatable {
     private readonly allCheckers: { [code: string]: ShippingEligibilityChecker } = {};
     private readonly allCalculators: { [code: string]: ShippingCalculator } = {};
 
@@ -41,7 +49,9 @@ export class ShippingMethod extends VendureEntity implements ChannelAware, SoftD
 
     @Column() code: string;
 
-    @Column() description: string;
+    name: LocaleString;
+
+    description: LocaleString;
 
     @Column('simple-json') checker: ConfigurableOperation;
 
@@ -51,22 +61,31 @@ export class ShippingMethod extends VendureEntity implements ChannelAware, SoftD
     @JoinTable()
     channels: Channel[];
 
-    async apply(order: Order): Promise<ShippingCalculationResult | undefined> {
+    @OneToMany(type => ShippingMethodTranslation, translation => translation.base, { eager: true })
+    translations: Array<Translation<ShippingMethod>>;
+
+    @Column(type => CustomShippingMethodFields)
+    customFields: CustomShippingMethodFields;
+
+    async apply(ctx: RequestContext, order: Order): Promise<ShippingCalculationResult | undefined> {
         const calculator = this.allCalculators[this.calculator.code];
         if (calculator) {
-            const { price, priceWithTax, metadata } = await calculator.calculate(order, this.calculator.args);
-            return {
-                price: Math.round(price),
-                priceWithTax: Math.round(priceWithTax),
-                metadata,
-            };
+            const response = await calculator.calculate(ctx, order, this.calculator.args);
+            if (response) {
+                const { price, priceWithTax, metadata } = response;
+                return {
+                    price: Math.round(price),
+                    priceWithTax: Math.round(priceWithTax),
+                    metadata,
+                };
+            }
         }
     }
 
-    async test(order: Order): Promise<boolean> {
+    async test(ctx: RequestContext, order: Order): Promise<boolean> {
         const checker = this.allCheckers[this.checker.code];
         if (checker) {
-            return checker.check(order, this.checker.args);
+            return checker.check(ctx, order, this.checker.args);
         } else {
             return false;
         }

@@ -3,6 +3,12 @@ scalar JSON
 scalar DateTime
 scalar Upload
 
+enum GlobalFlag {
+    TRUE
+    FALSE
+    INHERIT
+}
+
 enum AdjustmentType {
     TAX
     PROMOTION
@@ -22,16 +28,16 @@ type Adjustment {
 
 type ConfigArg {
     name: String!
-    type: String!
     value: String!
 }
 
 type ConfigArgDefinition {
     name: String!
     type: String!
+    list: Boolean!
     label: String
     description: String
-    config: JSON
+    ui: JSON
 }
 
 type ConfigurableOperation {
@@ -52,6 +58,11 @@ enum DeletionResult {
     NOT_DELETED
 }
 
+# Populated at run-time
+enum Permission {
+    Placeholder
+}
+
 type DeletionResponse {
     result: DeletionResult!
     message: String
@@ -59,7 +70,6 @@ type DeletionResponse {
 
 input ConfigArgInput {
     name: String!
-    type: String!
     value: String!
 }
 
@@ -82,9 +92,23 @@ enum SortOrder {
     DESC
 }
 
+enum ErrorCode {
+    UNKNOWN_ERROR
+}
+
+interface ErrorResult {
+    errorCode: ErrorCode!
+    message: String!
+}
+
 input StringOperators {
     eq: String
+    notEq: String
     contains: String
+    notContains: String
+    in: [String!]
+    notIn: [String!]
+    regex: String
 }
 
 input BooleanOperators {
@@ -117,10 +141,17 @@ input DateOperators {
     between: DateRange
 }
 
+enum LogicalOperator {
+    AND
+    OR
+}
+
 input SearchInput {
     term: String
     facetValueIds: [ID!]
+    facetValueOperator: LogicalOperator
     collectionId: ID
+    collectionSlug: String
     groupByProduct: Boolean
     take: Int
     skip: Int
@@ -167,4 +198,39 @@ input UpdateAddressInput {
     phoneNumber: String
     defaultShippingAddress: Boolean
     defaultBillingAddress: Boolean
+}
+
+"""
+Indicates that an operation succeeded, where we do not want to return any more specific information.
+"""
+type Success {
+    success: Boolean!
+}
+
+"Retured when attempting an operation that relies on the NativeAuthStrategy, if that strategy is not configured."
+type NativeAuthStrategyError implements ErrorResult {
+    errorCode: ErrorCode!
+    message: String!
+}
+
+"Returned if the user authentication credentials are not valid"
+type InvalidCredentialsError implements ErrorResult {
+    errorCode: ErrorCode!
+    message: String!
+    authenticationError: String!
+}
+
+"Returned if there is an error in transitioning the Order state"
+type OrderStateTransitionError implements ErrorResult {
+    errorCode: ErrorCode!
+    message: String!
+    transitionError: String!
+    fromState: String!
+    toState: String!
+}
+
+"Retured when attemting to create a Customer with an email address already registered to an existing User."
+type EmailAddressConflictError implements ErrorResult {
+    errorCode: ErrorCode!
+    message: String!
 }

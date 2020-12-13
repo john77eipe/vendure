@@ -10,8 +10,10 @@ import { CustomFields } from './custom-field/custom-field-types';
 import { EntityIdStrategy } from './entity-id-strategy/entity-id-strategy';
 import { Logger, VendureLogger } from './logger/vendure-logger';
 import {
+    ApiOptions,
     AssetOptions,
     AuthOptions,
+    CatalogOptions,
     ImportExportOptions,
     JobQueueOptions,
     OrderOptions,
@@ -19,6 +21,7 @@ import {
     PromotionOptions,
     RuntimeVendureConfig,
     ShippingOptions,
+    SuperadminCredentials,
     TaxOptions,
     VendureConfig,
     WorkerOptions,
@@ -36,43 +39,31 @@ export class ConfigService implements VendureConfig {
         }
     }
 
+    get apiOptions(): Required<ApiOptions> {
+        return this.activeConfig.apiOptions;
+    }
+
     get authOptions(): Required<AuthOptions> {
         return this.activeConfig.authOptions;
+    }
+
+    get catalogOptions(): Required<CatalogOptions> {
+        return this.activeConfig.catalogOptions;
     }
 
     get defaultChannelToken(): string | null {
         return this.activeConfig.defaultChannelToken;
     }
 
-    get channelTokenKey(): string {
-        return this.activeConfig.channelTokenKey;
-    }
-
     get defaultLanguageCode(): LanguageCode {
         return this.activeConfig.defaultLanguageCode;
     }
 
-    get adminApiPath(): string {
-        return this.activeConfig.adminApiPath;
-    }
-
-    get shopApiPath(): string {
-        return this.activeConfig.shopApiPath;
-    }
-
-    get port(): number {
-        return this.activeConfig.port;
-    }
-
-    get cors(): boolean | CorsOptions {
-        return this.activeConfig.cors;
-    }
-
-    get entityIdStrategy(): EntityIdStrategy {
+    get entityIdStrategy(): EntityIdStrategy<any> {
         return this.activeConfig.entityIdStrategy;
     }
 
-    get assetOptions(): AssetOptions {
+    get assetOptions(): Required<AssetOptions> {
         return this.activeConfig.assetOptions;
     }
 
@@ -106,14 +97,6 @@ export class ConfigService implements VendureConfig {
 
     get customFields(): Required<CustomFields> {
         return this.activeConfig.customFields;
-    }
-
-    get middleware(): Array<{ handler: RequestHandler; route: string }> {
-        return this.activeConfig.middleware;
-    }
-
-    get apolloServerPlugins(): PluginDefinition[] {
-        return this.activeConfig.apolloServerPlugins;
     }
 
     get plugins(): Array<DynamicModule | Type<any>> {

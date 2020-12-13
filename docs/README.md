@@ -4,15 +4,15 @@ This is the source for the Vendure documentation website. Docs are written in ma
 
 ## Building the docs
 
-To build the docs, first [install Hugo](https://gohugo.io/getting-started/installing/) on your machine.
-
-The run the `docs:build` script from the root of this repo.
+1. [Install Hugo](https://gohugo.io/getting-started/installing/) on your machine. Currently, the live docs are built with **Hugo v0.7**.
+2. Install docs dependencies by running `yarn install` or `npm install` in this directory.
+3. Then run the `docs:build` script from the root of this repo.
 
 This task will:
 
-1. Auto-generate the API markdown files based on the Vendure server source (see below)
-2. Run webpack to build the JavaScript and CSS for the docs site
-3. Run Hugo to build and output the site into the `docs/public` directory.
+* Auto-generate the API markdown files based on the Vendure server source (see below)
+* Run webpack to build the JavaScript and CSS for the docs site
+* Run Hugo to build and output the site into the `docs/public` directory.
 
 ## Dev mode
 
@@ -48,6 +48,11 @@ This is required as its presence determines whether the declaration is extracted
 
 This optional tag can be used to group declarations together onto a single page. This is useful e.g. in the case of utility functions or
 type aliases, which may be considered too trivial to get an entire page to themselves.
+
+##### `@docsWeight`
+
+This optional tag can be used to define the order of definitions on a single page. By default, multiple definitions on a page are sorted alphabetically,
+but this sometimes leaves the "main" definition near the bottom. In this case, the `@docsWeight` tag can promote it to the top (0 is first).
 
 ##### `@description`
 

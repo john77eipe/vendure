@@ -1,13 +1,12 @@
 import { Injectable } from '@nestjs/common';
-import { InjectConnection } from '@nestjs/typeorm';
 import {
     CreateProductVariantInput,
     DeletionResponse,
     DeletionResult,
+    GlobalFlag,
     UpdateProductVariantInput,
 } from '@vendure/common/lib/generated-types';
 import { ID, PaginatedList } from '@vendure/common/lib/shared-types';
-import { Connection } from 'typeorm';
 
 import { RequestContext } from '../../api/common/request-context';
 import { InternalServerError, UserInputError } from '../../common/error/errors';
@@ -15,7 +14,7 @@ import { ListQueryOptions } from '../../common/types/common-types';
 import { Translated } from '../../common/types/locale-types';
 import { idsAreEqual } from '../../common/utils';
 import { ConfigService } from '../../config/config.service';
-import { ProductOptionGroup, ProductVariantPrice, TaxCategory } from '../../entity';
+import { OrderLine, ProductOptionGroup, ProductVariantPrice, TaxCategory } from '../../entity';
 import { FacetValue } from '../../entity/facet-value/facet-value.entity';
 import { ProductOption } from '../../entity/product-option/product-option.entity';
 import { ProductVariantTranslation } from '../../entity/product-variant/product-variant-translation.entity';
@@ -26,9 +25,9 @@ import { ProductVariantEvent } from '../../event-bus/events/product-variant-even
 import { ListQueryBuilder } from '../helpers/list-query-builder/list-query-builder';
 import { TaxCalculator } from '../helpers/tax-calculator/tax-calculator';
 import { TranslatableSaver } from '../helpers/translatable-saver/translatable-saver';
-import { getEntityOrThrow } from '../helpers/utils/get-entity-or-throw';
 import { samplesEach } from '../helpers/utils/samples-each';
 import { translateDeep } from '../helpers/utils/translate-entity';
+import { TransactionalConnection } from '../transaction/transactional-connection';
 
 import { AssetService } from './asset.service';
 import { FacetValueService } from './facet-value.service';
@@ -41,7 +40,7 @@ import { ZoneService } from './zone.service';
 @Injectable()
 export class ProductVariantService {
     constructor(
-        @InjectConnection() private connection: Connection,
+        private connection: TransactionalConnection,
         private configService: ConfigService,
         private taxCategoryService: TaxCategoryService,
         private facetValueService: FacetValueService,
@@ -59,18 +58,20 @@ export class ProductVariantService {
     findOne(ctx: RequestContext, productVariantId: ID): Promise<Translated<ProductVariant> | undefined> {
         const relations = ['product', 'product.featuredAsset', 'taxCategory'];
         return this.connection
-            .getRepository(ProductVariant)
+            .getRepository(ctx, ProductVariant)
             .findOne(productVariantId, { relations })
-            .then((result) => {
+            .then(result => {
                 if (result) {
-                    return translateDeep(this.applyChannelPriceAndTax(result, ctx), ctx.languageCode);
+                    return translateDeep(this.applyChannelPriceAndTax(result, ctx), ctx.languageCode, [
+                        'product',
+                    ]);
                 }
             });
     }
 
     findByIds(ctx: RequestContext, ids: ID[]): Promise<Array<Translated<ProductVariant>>> {
-        return this.connection.manager
-            .getRepository(ProductVariant)
+        return this.connection
+            .getRepository(ctx, ProductVariant)
             .findByIds(ids, {
                 relations: [
                     'options',
@@ -81,8 +82,8 @@ export class ProductVariantService {
                     'featuredAsset',
                 ],
             })
-            .then((variants) => {
-                return variants.map((variant) =>
+            .then(variants => {
+                return variants.map(variant =>
                     translateDeep(this.applyChannelPriceAndTax(variant, ctx), ctx.languageCode, [
                         'options',
                         'facetValues',
@@ -94,7 +95,7 @@ export class ProductVariantService {
 
     getVariantsByProductId(ctx: RequestContext, productId: ID): Promise<Array<Translated<ProductVariant>>> {
         return this.connection
-            .getRepository(ProductVariant)
+            .getRepository(ctx, ProductVariant)
             .find({
                 where: {
                     product: { id: productId } as any,
@@ -112,8 +113,8 @@ export class ProductVariantService {
                     id: 'ASC',
                 },
             })
-            .then((variants) =>
-                variants.map((variant) => {
+            .then(variants =>
+                variants.map(variant => {
                     const variantWithPrices = this.applyChannelPriceAndTax(variant, ctx);
                     return translateDeep(variantWithPrices, ctx.languageCode, [
                         'options',
@@ -133,6 +134,7 @@ export class ProductVariantService {
             .build(ProductVariant, options, {
                 relations: ['taxCategory'],
                 channelId: ctx.channelId,
+                ctx,
             })
             .leftJoin('productvariant.collections', 'collection')
             .leftJoin('productvariant.product', 'product')
@@ -144,7 +146,7 @@ export class ProductVariantService {
         }
 
         return qb.getManyAndCount().then(async ([variants, totalItems]) => {
-            const items = variants.map((variant) => {
+            const items = variants.map(variant => {
                 const variantWithPrices = this.applyChannelPriceAndTax(variant, ctx);
                 return translateDeep(variantWithPrices, ctx.languageCode);
             });
@@ -155,22 +157,75 @@ export class ProductVariantService {
         });
     }
 
+    async getVariantByOrderLineId(ctx: RequestContext, orderLineId: ID): Promise<Translated<ProductVariant>> {
+        const { productVariant } = await this.connection.getEntityOrThrow(ctx, OrderLine, orderLineId, {
+            relations: ['productVariant'],
+        });
+        return translateDeep(productVariant, ctx.languageCode);
+    }
+
     getOptionsForVariant(ctx: RequestContext, variantId: ID): Promise<Array<Translated<ProductOption>>> {
         return this.connection
-            .getRepository(ProductVariant)
+            .getRepository(ctx, ProductVariant)
             .findOne(variantId, { relations: ['options'] })
-            .then((variant) =>
-                !variant ? [] : variant.options.map((o) => translateDeep(o, ctx.languageCode)),
-            );
+            .then(variant => (!variant ? [] : variant.options.map(o => translateDeep(o, ctx.languageCode))));
     }
 
     getFacetValuesForVariant(ctx: RequestContext, variantId: ID): Promise<Array<Translated<FacetValue>>> {
         return this.connection
-            .getRepository(ProductVariant)
+            .getRepository(ctx, ProductVariant)
             .findOne(variantId, { relations: ['facetValues', 'facetValues.facet'] })
-            .then((variant) =>
-                !variant ? [] : variant.facetValues.map((o) => translateDeep(o, ctx.languageCode, ['facet'])),
+            .then(variant =>
+                !variant ? [] : variant.facetValues.map(o => translateDeep(o, ctx.languageCode, ['facet'])),
             );
+    }
+
+    /**
+     * Returns the Product associated with the ProductVariant. Whereas the `ProductService.findOne()`
+     * method performs a large multi-table join with all the typical data needed for a "product detail"
+     * page, this method returns on the Product itself.
+     */
+    async getProductForVariant(ctx: RequestContext, variant: ProductVariant): Promise<Translated<Product>> {
+        const product = await this.connection.getEntityOrThrow(ctx, Product, variant.productId);
+        return translateDeep(product, ctx.languageCode);
+    }
+
+    /**
+     * @description
+     * Returns the number of saleable units of the ProductVariant, i.e. how many are available
+     * for purchase by Customers.
+     */
+    async getSaleableStockLevel(ctx: RequestContext, variant: ProductVariant): Promise<number> {
+        const { outOfStockThreshold, trackInventory } = await this.globalSettingsService.getSettings(ctx);
+        const inventoryNotTracked =
+            variant.trackInventory === GlobalFlag.FALSE ||
+            (variant.trackInventory === GlobalFlag.INHERIT && trackInventory === false);
+        if (inventoryNotTracked) {
+            return Number.MAX_SAFE_INTEGER;
+        }
+
+        const effectiveOutOfStockThreshold = variant.useGlobalOutOfStockThreshold
+            ? outOfStockThreshold
+            : variant.outOfStockThreshold;
+
+        return variant.stockOnHand - variant.stockAllocated - effectiveOutOfStockThreshold;
+    }
+
+    /**
+     * @description
+     * Returns the number of fulfillable units of the ProductVariant, equivalent to stockOnHand
+     * for those variants which are tracking inventory.
+     */
+    async getFulfillableStockLevel(ctx: RequestContext, variant: ProductVariant): Promise<number> {
+        const { outOfStockThreshold, trackInventory } = await this.globalSettingsService.getSettings(ctx);
+        const inventoryNotTracked =
+            variant.trackInventory === GlobalFlag.FALSE ||
+            (variant.trackInventory === GlobalFlag.INHERIT && trackInventory === false);
+        if (inventoryNotTracked) {
+            return Number.MAX_SAFE_INTEGER;
+        }
+
+        return variant.stockOnHand;
     }
 
     async create(
@@ -196,7 +251,7 @@ export class ProductVariantService {
         }
         const updatedVariants = await this.findByIds(
             ctx,
-            input.map((i) => i.id),
+            input.map(i => i.id),
         );
         this.eventBus.publish(new ProductVariantEvent(ctx, updatedVariants, 'updated'));
         return updatedVariants;
@@ -210,76 +265,80 @@ export class ProductVariantService {
         if (input.price == null) {
             input.price = 0;
         }
-        input.taxCategoryId = (await this.getTaxCategoryForNewVariant(input.taxCategoryId)).id as string;
+        input.taxCategoryId = (await this.getTaxCategoryForNewVariant(ctx, input.taxCategoryId)).id;
 
         const createdVariant = await this.translatableSaver.create({
+            ctx,
             input,
             entityType: ProductVariant,
             translationType: ProductVariantTranslation,
-            beforeSave: async (variant) => {
+            beforeSave: async variant => {
                 const { optionIds } = input;
                 if (optionIds && optionIds.length) {
                     const selectedOptions = await this.connection
-                        .getRepository(ProductOption)
+                        .getRepository(ctx, ProductOption)
                         .findByIds(optionIds);
                     variant.options = selectedOptions;
                 }
                 if (input.facetValueIds) {
-                    variant.facetValues = await this.facetValueService.findByIds(input.facetValueIds);
-                }
-                if (input.trackInventory == null) {
-                    variant.trackInventory = (await this.globalSettingsService.getSettings()).trackInventory;
+                    variant.facetValues = await this.facetValueService.findByIds(ctx, input.facetValueIds);
                 }
                 variant.product = { id: input.productId } as any;
                 variant.taxCategory = { id: input.taxCategoryId } as any;
-                await this.assetService.updateFeaturedAsset(variant, input);
+                await this.assetService.updateFeaturedAsset(ctx, variant, input);
             },
             typeOrmSubscriberData: {
                 channelId: ctx.channelId,
                 taxCategoryId: input.taxCategoryId,
             },
         });
-        await this.assetService.updateEntityAssets(createdVariant, input);
+        await this.assetService.updateEntityAssets(ctx, createdVariant, input);
         if (input.stockOnHand != null && input.stockOnHand !== 0) {
             await this.stockMovementService.adjustProductVariantStock(
+                ctx,
                 createdVariant.id,
                 0,
                 input.stockOnHand,
             );
         }
 
-        await this.createProductVariantPrice(createdVariant.id, createdVariant.price, ctx.channelId);
+        await this.createProductVariantPrice(ctx, createdVariant.id, createdVariant.price, ctx.channelId);
         return createdVariant.id;
     }
 
     private async updateSingle(ctx: RequestContext, input: UpdateProductVariantInput): Promise<ID> {
-        const existingVariant = await getEntityOrThrow(this.connection, ProductVariant, input.id);
+        const existingVariant = await this.connection.getEntityOrThrow(ctx, ProductVariant, input.id);
         if (input.stockOnHand && input.stockOnHand < 0) {
             throw new UserInputError('error.stockonhand-cannot-be-negative');
         }
         await this.translatableSaver.update({
+            ctx,
             input,
             entityType: ProductVariant,
             translationType: ProductVariantTranslation,
-            beforeSave: async (updatedVariant) => {
+            beforeSave: async updatedVariant => {
                 if (input.taxCategoryId) {
-                    const taxCategory = await this.taxCategoryService.findOne(input.taxCategoryId);
+                    const taxCategory = await this.taxCategoryService.findOne(ctx, input.taxCategoryId);
                     if (taxCategory) {
                         updatedVariant.taxCategory = taxCategory;
                     }
                 }
                 if (input.facetValueIds) {
-                    updatedVariant.facetValues = await this.facetValueService.findByIds(input.facetValueIds);
+                    updatedVariant.facetValues = await this.facetValueService.findByIds(
+                        ctx,
+                        input.facetValueIds,
+                    );
                 }
                 if (input.stockOnHand != null) {
                     await this.stockMovementService.adjustProductVariantStock(
+                        ctx,
                         existingVariant.id,
                         existingVariant.stockOnHand,
                         input.stockOnHand,
                     );
                 }
-                await this.assetService.updateFeaturedAsset(updatedVariant, input);
-                await this.assetService.updateEntityAssets(updatedVariant, input);
+                await this.assetService.updateFeaturedAsset(ctx, updatedVariant, input);
+                await this.assetService.updateEntityAssets(ctx, updatedVariant, input);
             },
             typeOrmSubscriberData: {
                 channelId: ctx.channelId,
@@ -287,7 +346,7 @@ export class ProductVariantService {
             },
         });
         if (input.price != null) {
-            const variantPriceRepository = this.connection.getRepository(ProductVariantPrice);
+            const variantPriceRepository = this.connection.getRepository(ctx, ProductVariantPrice);
             const variantPrice = await variantPriceRepository.findOne({
                 where: {
                     variant: input.id,
@@ -307,6 +366,7 @@ export class ProductVariantService {
      * Creates a ProductVariantPrice for the given ProductVariant/Channel combination.
      */
     async createProductVariantPrice(
+        ctx: RequestContext,
         productVariantId: ID,
         price: number,
         channelId: ID,
@@ -316,13 +376,13 @@ export class ProductVariantService {
             channelId,
         });
         variantPrice.variant = new ProductVariant({ id: productVariantId });
-        return this.connection.getRepository(ProductVariantPrice).save(variantPrice);
+        return this.connection.getRepository(ctx, ProductVariantPrice).save(variantPrice);
     }
 
     async softDelete(ctx: RequestContext, id: ID): Promise<DeletionResponse> {
-        const variant = await getEntityOrThrow(this.connection, ProductVariant, id);
+        const variant = await this.connection.getEntityOrThrow(ctx, ProductVariant, id);
         variant.deletedAt = new Date();
-        await this.connection.getRepository(ProductVariant).save(variant, { reload: false });
+        await this.connection.getRepository(ctx, ProductVariant).save(variant, { reload: false });
         this.eventBus.publish(new ProductVariantEvent(ctx, [variant], 'deleted'));
         return {
             result: DeletionResult.DELETED,
@@ -333,15 +393,16 @@ export class ProductVariantService {
      * Populates the `price` field with the price for the specified channel.
      */
     applyChannelPriceAndTax(variant: ProductVariant, ctx: RequestContext): ProductVariant {
-        const channelPrice = variant.productVariantPrices.find((p) =>
-            idsAreEqual(p.channelId, ctx.channelId),
-        );
+        const channelPrice = variant.productVariantPrices.find(p => idsAreEqual(p.channelId, ctx.channelId));
         if (!channelPrice) {
             throw new InternalServerError(`error.no-price-found-for-channel`);
         }
         const { taxZoneStrategy } = this.configService.taxOptions;
         const zones = this.zoneService.findAll(ctx);
-        const activeTaxZone = taxZoneStrategy.determineTaxZone(zones, ctx.channel);
+        const activeTaxZone = taxZoneStrategy.determineTaxZone(ctx, zones, ctx.channel);
+        if (!activeTaxZone) {
+            throw new InternalServerError(`error.no-active-tax-zone`);
+        }
         const applicableTaxRate = this.taxRateService.getApplicableTaxRate(
             activeTaxZone,
             variant.taxCategory,
@@ -363,31 +424,48 @@ export class ProductVariantService {
     }
 
     private async validateVariantOptionIds(ctx: RequestContext, input: CreateProductVariantInput) {
-        const product = await getEntityOrThrow(this.connection, Product, input.productId, ctx.channelId, {
-            relations: ['optionGroups', 'optionGroups.options', 'variants', 'variants.options'],
-        });
-        const optionIds = [...(input.optionIds || [])];
+        // this could be done with less queries but depending on the data, node will crash
+        // https://github.com/vendure-ecommerce/vendure/issues/328
+        const optionGroups = (
+            await this.connection.getEntityOrThrow(ctx, Product, input.productId, {
+                channelId: ctx.channelId,
+                relations: ['optionGroups', 'optionGroups.options'],
+                loadEagerRelations: false,
+            })
+        ).optionGroups;
 
-        if (optionIds.length !== product.optionGroups.length) {
-            this.throwIncompatibleOptionsError(product.optionGroups);
+        const optionIds = input.optionIds || [];
+
+        if (optionIds.length !== optionGroups.length) {
+            this.throwIncompatibleOptionsError(optionGroups);
         }
         if (
             !samplesEach(
                 optionIds,
-                product.optionGroups.map((g) => g.options.map((o) => o.id)),
+                optionGroups.map(g => g.options.map(o => o.id)),
             )
         ) {
-            this.throwIncompatibleOptionsError(product.optionGroups);
+            this.throwIncompatibleOptionsError(optionGroups);
         }
-        product.variants.forEach((variant) => {
-            const variantOptionIds = this.sortJoin(variant.options, ',', 'id');
-            const inputOptionIds = this.sortJoin(input.optionIds || [], ',');
-            if (variantOptionIds === inputOptionIds) {
-                throw new UserInputError('error.product-variant-options-combination-already-exists', {
-                    optionNames: this.sortJoin(variant.options, ', ', 'code'),
-                });
-            }
+
+        const product = await this.connection.getEntityOrThrow(ctx, Product, input.productId, {
+            channelId: ctx.channelId,
+            relations: ['variants', 'variants.options'],
+            loadEagerRelations: false,
         });
+
+        const inputOptionIds = this.sortJoin(optionIds, ',');
+
+        product.variants
+            .filter(v => !v.deletedAt)
+            .forEach(variant => {
+                const variantOptionIds = this.sortJoin(variant.options, ',', 'id');
+                if (variantOptionIds === inputOptionIds) {
+                    throw new UserInputError('error.product-variant-options-combination-already-exists', {
+                        optionNames: this.sortJoin(variant.options, ', ', 'code'),
+                    });
+                }
+            });
     }
 
     private throwIncompatibleOptionsError(optionGroups: ProductOptionGroup[]) {
@@ -398,24 +476,25 @@ export class ProductVariantService {
 
     private sortJoin<T>(arr: T[], glue: string, prop?: keyof T): string {
         return arr
-            .map((x) => (prop ? x[prop] : x))
+            .map(x => (prop ? x[prop] : x))
             .sort()
             .join(glue);
     }
 
     private async getTaxCategoryForNewVariant(
-        taxCategoryId: string | null | undefined,
+        ctx: RequestContext,
+        taxCategoryId: ID | null | undefined,
     ): Promise<TaxCategory> {
         let taxCategory: TaxCategory;
         if (taxCategoryId) {
-            taxCategory = await getEntityOrThrow(this.connection, TaxCategory, taxCategoryId);
+            taxCategory = await this.connection.getEntityOrThrow(ctx, TaxCategory, taxCategoryId);
         } else {
-            const taxCategories = await this.taxCategoryService.findAll();
+            const taxCategories = await this.taxCategoryService.findAll(ctx);
             taxCategory = taxCategories[0];
         }
         if (!taxCategory) {
             // there is no TaxCategory set up, so create a default
-            taxCategory = await this.taxCategoryService.create({ name: 'Standard Tax' });
+            taxCategory = await this.taxCategoryService.create(ctx, { name: 'Standard Tax' });
         }
         return taxCategory;
     }

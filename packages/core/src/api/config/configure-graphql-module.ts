@@ -8,6 +8,11 @@ import { GraphQLDateTime } from 'graphql-iso-date';
 import GraphQLJSON from 'graphql-type-json';
 import path from 'path';
 
+import {
+    adminErrorOperationTypeResolvers,
+    ErrorResult,
+} from '../../common/error/generated-graphql-admin-errors';
+import { shopErrorOperationTypeResolvers } from '../../common/error/generated-graphql-shop-errors';
 import { ConfigModule } from '../../config/config.module';
 import { ConfigService } from '../../config/config.service';
 import { I18nModule } from '../../i18n/i18n.module';
@@ -20,10 +25,14 @@ import { AssetInterceptorPlugin } from '../middleware/asset-interceptor-plugin';
 import { IdCodecPlugin } from '../middleware/id-codec-plugin';
 import { TranslateErrorsPlugin } from '../middleware/translate-errors-plugin';
 
+import { generateAuthenticationTypes } from './generate-auth-types';
+import { generateErrorCodeEnum } from './generate-error-code-enum';
 import { generateListOptions } from './generate-list-options';
+import { generatePermissionEnum } from './generate-permissions';
 import {
     addGraphQLCustomFields,
     addOrderLineCustomFieldsInput,
+    addRegisterCustomerCustomFieldsInput,
     addServerConfigCustomFields,
 } from './graphql-custom-fields';
 
@@ -31,6 +40,8 @@ export interface GraphQLApiOptions {
     apiType: 'shop' | 'admin';
     typePaths: string[];
     apiPath: string;
+    debug: boolean;
+    playground: boolean | any;
     // tslint:disable-next-line:ban-types
     resolverModule: Function;
 }
@@ -81,12 +92,16 @@ async function createGraphQLOptions(
             switch (value.type) {
                 case StockMovementType.ADJUSTMENT:
                     return 'StockAdjustment';
+                case StockMovementType.ALLOCATION:
+                    return 'Allocation';
                 case StockMovementType.SALE:
                     return 'Sale';
                 case StockMovementType.CANCELLATION:
                     return 'Cancellation';
                 case StockMovementType.RETURN:
                     return 'Return';
+                case StockMovementType.RELEASE:
+                    return 'Release';
             }
         },
     };
@@ -129,16 +144,20 @@ async function createGraphQLOptions(
             StockMovement: stockMovementResolveType,
             CustomFieldConfig: customFieldsConfigResolveType,
             CustomField: customFieldsConfigResolveType,
+            ErrorResult: {
+                __resolveType(value: ErrorResult) {
+                    return value.__typename;
+                },
+            },
+            ...(options.apiType === 'admin'
+                ? adminErrorOperationTypeResolvers
+                : shopErrorOperationTypeResolvers),
         },
         uploads: {
             maxFileSize: configService.assetOptions.uploadMaxFileSize,
         },
-        playground: {
-            settings: {
-                'request.credentials': 'include',
-            } as any,
-        },
-        debug: true,
+        playground: options.playground || false,
+        debug: options.debug || false,
         context: (req: any) => req,
         // This is handled by the Express cors plugin
         cors: false,
@@ -146,7 +165,7 @@ async function createGraphQLOptions(
             new IdCodecPlugin(idCodecService),
             new TranslateErrorsPlugin(i18nService),
             new AssetInterceptorPlugin(configService),
-            ...configService.apolloServerPlugins,
+            ...configService.apiOptions.apolloServerPlugins,
         ],
     } as GqlModuleOptions;
 
@@ -162,16 +181,26 @@ async function createGraphQLOptions(
         // See https://github.com/nestjs/graphql/issues/336
         const normalizedPaths = options.typePaths.map(p => p.split(path.sep).join('/'));
         const typeDefs = await typesLoader.mergeTypesByPaths(normalizedPaths);
+        const authStrategies =
+            apiType === 'shop'
+                ? configService.authOptions.shopAuthenticationStrategy
+                : configService.authOptions.adminAuthenticationStrategy;
         let schema = buildSchema(typeDefs);
 
         getPluginAPIExtensions(configService.plugins, apiType)
             .map(e => (typeof e.schema === 'function' ? e.schema() : e.schema))
             .filter(notNullOrUndefined)
             .forEach(documentNode => (schema = extendSchema(schema, documentNode)));
+        schema = generatePermissionEnum(schema, configService.authOptions.customPermissions);
         schema = generateListOptions(schema);
         schema = addGraphQLCustomFields(schema, customFields, apiType === 'shop');
         schema = addServerConfigCustomFields(schema, customFields);
         schema = addOrderLineCustomFieldsInput(schema, customFields.OrderLine || []);
+        schema = generateAuthenticationTypes(schema, authStrategies);
+        schema = generateErrorCodeEnum(schema);
+        if (apiType === 'shop') {
+            schema = addRegisterCustomerCustomFieldsInput(schema, customFields.Customer || []);
+        }
 
         return printSchema(schema);
     }

@@ -1,11 +1,12 @@
 import { Injectable, Injector } from '@angular/core';
-import gql from 'graphql-tag';
 
 import {
     CustomFieldConfig,
     CustomFields,
     GetGlobalSettings,
     GetServerConfig,
+    OrderProcessState,
+    PermissionDefinition,
     ServerConfig,
 } from '../common/generated-types';
 
@@ -62,7 +63,7 @@ export class ServerConfigService {
     }
 
     /**
-     * When any of the GLobalSettings are modified, this method should be called to update the Apollo cache.
+     * When any of the GlobalSettings are modified, this method should be called to update the Apollo cache.
      */
     refreshGlobalSettings() {
         return this.baseDataService.query<GetGlobalSettings.Query>(GET_GLOBAL_SETTINGS, {}, 'network-only')
@@ -74,6 +75,18 @@ export class ServerConfigService {
      */
     getCustomFieldsFor(type: Exclude<keyof CustomFields, '__typename'>): CustomFieldConfig[] {
         return this.serverConfig.customFieldConfig[type] || [];
+    }
+
+    getOrderProcessStates(): OrderProcessState[] {
+        return this.serverConfig.orderProcess;
+    }
+
+    getPermittedAssetTypes(): string[] {
+        return this.serverConfig.permittedAssetTypes;
+    }
+
+    getPermissionDefinitions(): PermissionDefinition[] {
+        return this.serverConfig.permissions;
     }
 
     get serverConfig(): ServerConfig {

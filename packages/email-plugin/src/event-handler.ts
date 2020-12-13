@@ -1,6 +1,8 @@
 import { LanguageCode } from '@vendure/common/lib/generated-types';
 import { Type } from '@vendure/common/lib/shared-types';
+import { Injector, Logger } from '@vendure/core';
 
+import { loggerCtx } from './constants';
 import { EmailEventListener, EmailTemplateConfig, SetTemplateVarsFn } from './event-listener';
 import { EventWithAsyncData, EventWithContext, IntermediateEmailDetails, LoadDataFn } from './types';
 
@@ -50,7 +52,7 @@ export class EmailEventHandler<T extends string = string, Event extends EventWit
     private configurations: EmailTemplateConfig[] = [];
     private defaultSubject: string;
     private from: string;
-    private _mockEvent: Omit<Event, 'ctx'> | undefined;
+    private _mockEvent: Omit<Event, 'ctx' | 'data'> | undefined;
 
     constructor(public listener: EmailEventListener<T>, public event: Type<Event>) {}
 
@@ -60,7 +62,7 @@ export class EmailEventHandler<T extends string = string, Event extends EventWit
     }
 
     /** @internal */
-    get mockEvent(): Omit<Event, 'ctx'> | undefined {
+    get mockEvent(): Omit<Event, 'ctx' | 'data'> | undefined {
         return this._mockEvent;
     }
 
@@ -169,9 +171,25 @@ export class EmailEventHandler<T extends string = string, Event extends EventWit
     async handle(
         event: Event,
         globals: { [key: string]: any } = {},
+        injector: Injector,
     ): Promise<IntermediateEmailDetails | undefined> {
         for (const filterFn of this.filterFns) {
             if (!filterFn(event)) {
+                return;
+            }
+        }
+        if (this instanceof EmailEventHandlerWithAsyncData) {
+            try {
+                (event as EventWithAsyncData<Event, any>).data = await this._loadDataFn({
+                    event,
+                    injector,
+                });
+            } catch (err: unknown) {
+                if (err instanceof Error) {
+                    Logger.error(err.message, loggerCtx, err.stack);
+                } else {
+                    Logger.error(String(err), loggerCtx);
+                }
                 return;
             }
         }
@@ -213,7 +231,7 @@ export class EmailEventHandler<T extends string = string, Event extends EventWit
      * Optionally define a mock Event which is used by the dev mode mailbox app for generating mock emails
      * from this handler, which is useful when developing the email templates.
      */
-    setMockEvent(event: Omit<Event, 'ctx'>): EmailEventHandler<T, Event> {
+    setMockEvent(event: Omit<Event, 'ctx' | 'data'>): EmailEventHandler<T, Event> {
         this._mockEvent = event;
         return this;
     }
@@ -225,7 +243,7 @@ export class EmailEventHandler<T extends string = string, Event extends EventWit
         if (this.configurations.length === 0) {
             return;
         }
-        const exactMatch = this.configurations.find((c) => {
+        const exactMatch = this.configurations.find(c => {
             return (
                 (c.channelCode === channelCode || c.channelCode === 'default') &&
                 c.languageCode === languageCode
@@ -235,7 +253,7 @@ export class EmailEventHandler<T extends string = string, Event extends EventWit
             return exactMatch;
         }
         const channelMatch = this.configurations.find(
-            (c) => c.channelCode === channelCode && c.languageCode === 'default',
+            c => c.channelCode === channelCode && c.languageCode === 'default',
         );
         if (channelMatch) {
             return channelMatch;

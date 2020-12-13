@@ -3,7 +3,7 @@
   "compilerOptions": {
     "baseUrl": "./",
     "importHelpers": true,
-    "module": "esnext",
+    "module": "es2020",
     "outDir": "./dist/out-tsc",
     "sourceMap": true,
     "declaration": false,
@@ -53,6 +53,9 @@
       ],
       "@vendure/admin-ui/settings": [
         "./src/lib/settings/src/public_api"
+      ],
+      "@vendure/admin-ui/system": [
+        "./src/lib/system/src/public_api"
       ]
     }
   }

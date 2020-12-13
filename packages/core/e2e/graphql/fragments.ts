@@ -149,7 +149,6 @@ export const CONFIGURABLE_FRAGMENT = gql`
     fragment ConfigurableOperation on ConfigurableOperation {
         args {
             name
-            type
             value
         }
         code
@@ -160,6 +159,7 @@ export const COLLECTION_FRAGMENT = gql`
     fragment Collection on Collection {
         id
         name
+        slug
         description
         isPrivate
         languageCode
@@ -176,6 +176,7 @@ export const COLLECTION_FRAGMENT = gql`
             id
             languageCode
             name
+            slug
             description
         }
         parent {
@@ -451,6 +452,7 @@ export const TAX_RATE_FRAGMENT = gql`
         }
     }
 `;
+
 export const CURRENT_USER_FRAGMENT = gql`
     fragment CurrentUser on CurrentUser {
         id
@@ -462,10 +464,12 @@ export const CURRENT_USER_FRAGMENT = gql`
         }
     }
 `;
+
 export const VARIANT_WITH_STOCK_FRAGMENT = gql`
     fragment VariantWithStock on ProductVariant {
         id
         stockOnHand
+        stockAllocated
         stockMovements {
             items {
                 ... on StockMovement {
@@ -475,6 +479,124 @@ export const VARIANT_WITH_STOCK_FRAGMENT = gql`
                 }
             }
             totalItems
+        }
+    }
+`;
+
+export const FULFILLMENT_FRAGMENT = gql`
+    fragment Fulfillment on Fulfillment {
+        id
+        state
+        nextStates
+        method
+        trackingCode
+        orderItems {
+            id
+        }
+    }
+`;
+
+export const CHANNEL_FRAGMENT = gql`
+    fragment Channel on Channel {
+        id
+        code
+        token
+        currencyCode
+        defaultLanguageCode
+        defaultShippingZone {
+            id
+        }
+        defaultTaxZone {
+            id
+        }
+        pricesIncludeTax
+    }
+`;
+
+export const GLOBAL_SETTINGS_FRAGMENT = gql`
+    fragment GlobalSettings on GlobalSettings {
+        id
+        availableLanguages
+        trackInventory
+        outOfStockThreshold
+        serverConfig {
+            orderProcess {
+                name
+                to
+            }
+            permittedAssetTypes
+            permissions {
+                name
+                description
+                assignable
+            }
+            customFieldConfig {
+                Customer {
+                    ... on CustomField {
+                        name
+                    }
+                }
+            }
+        }
+    }
+`;
+
+export const CUSTOMER_GROUP_FRAGMENT = gql`
+    fragment CustomerGroup on CustomerGroup {
+        id
+        name
+        customers {
+            items {
+                id
+            }
+            totalItems
+        }
+    }
+`;
+
+export const PRODUCT_OPTION_GROUP_FRAGMENT = gql`
+    fragment ProductOptionGroup on ProductOptionGroup {
+        id
+        code
+        name
+        options {
+            id
+            code
+            name
+        }
+        translations {
+            id
+            languageCode
+            name
+        }
+    }
+`;
+
+export const PRODUCT_WITH_OPTIONS_FRAGMENT = gql`
+    fragment ProductWithOptions on Product {
+        id
+        optionGroups {
+            id
+            code
+            options {
+                id
+                code
+            }
+        }
+    }
+`;
+
+export const SHIPPING_METHOD_FRAGMENT = gql`
+    fragment ShippingMethod on ShippingMethod {
+        id
+        code
+        name
+        description
+        calculator {
+            code
+        }
+        checker {
+            code
         }
     }
 `;

@@ -1,5 +1,5 @@
+import { FetchPolicy, WatchQueryFetchPolicy } from '@apollo/client/core';
 import { pick } from '@vendure/common/lib/pick';
-import { FetchPolicy } from 'apollo-client';
 
 import {
     AddMembersToZone,
@@ -17,6 +17,7 @@ import {
     DeleteCountry,
     DeleteTaxCategory,
     DeleteTaxRate,
+    DeleteZone,
     GetActiveChannel,
     GetAllJobs,
     GetAvailableCountries,
@@ -39,7 +40,6 @@ import {
     JobListOptions,
     JobState,
     RemoveMembersFromZone,
-    SearchForTestOrder,
     UpdateChannel,
     UpdateChannelInput,
     UpdateCountry,
@@ -66,6 +66,7 @@ import {
     DELETE_COUNTRY,
     DELETE_TAX_CATEGORY,
     DELETE_TAX_RATE,
+    DELETE_ZONE,
     GET_ACTIVE_CHANNEL,
     GET_AVAILABLE_COUNTRIES,
     GET_CHANNEL,
@@ -73,10 +74,10 @@ import {
     GET_COUNTRY,
     GET_COUNTRY_LIST,
     GET_GLOBAL_SETTINGS,
-    GET_JOB_INFO,
-    GET_JOB_QUEUE_LIST,
     GET_JOBS_BY_ID,
     GET_JOBS_LIST,
+    GET_JOB_INFO,
+    GET_JOB_QUEUE_LIST,
     GET_PAYMENT_METHOD,
     GET_PAYMENT_METHOD_LIST,
     GET_TAX_CATEGORIES,
@@ -85,7 +86,6 @@ import {
     GET_TAX_RATE_LIST,
     GET_ZONES,
     REMOVE_MEMBERS_FROM_ZONE,
-    SEARCH_FOR_TEST_ORDER,
     UPDATE_CHANNEL,
     UPDATE_COUNTRY,
     UPDATE_GLOBAL_SETTINGS,
@@ -155,6 +155,12 @@ export class SettingsDataService {
     updateZone(input: UpdateZoneInput) {
         return this.baseDataService.mutate<UpdateZone.Mutation, UpdateZone.Variables>(UPDATE_ZONE, {
             input,
+        });
+    }
+
+    deleteZone(id: string) {
+        return this.baseDataService.mutate<DeleteZone.Mutation, DeleteZone.Variables>(DELETE_ZONE, {
+            id,
         });
     }
 
@@ -318,8 +324,12 @@ export class SettingsDataService {
         );
     }
 
-    getGlobalSettings() {
-        return this.baseDataService.query<GetGlobalSettings.Query>(GET_GLOBAL_SETTINGS);
+    getGlobalSettings(fetchPolicy?: WatchQueryFetchPolicy) {
+        return this.baseDataService.query<GetGlobalSettings.Query>(
+            GET_GLOBAL_SETTINGS,
+            undefined,
+            fetchPolicy,
+        );
     }
 
     updateGlobalSettings(input: UpdateGlobalSettingsInput) {
@@ -361,15 +371,5 @@ export class SettingsDataService {
                 },
             },
         });
-    }
-
-    searchForTestOrder(term: string, take: number) {
-        return this.baseDataService.query<SearchForTestOrder.Query, SearchForTestOrder.Variables>(
-            SEARCH_FOR_TEST_ORDER,
-            {
-                take,
-                term,
-            },
-        );
     }
 }

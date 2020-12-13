@@ -1,4 +1,4 @@
-import { PriceRange, SortOrder } from '@vendure/common/lib/generated-types';
+import { LanguageCode, LogicalOperator, PriceRange, SortOrder } from '@vendure/common/lib/generated-types';
 import { DeepRequired, ID } from '@vendure/core';
 
 import { SearchConfig } from './options';
@@ -11,12 +11,15 @@ export function buildElasticBody(
     input: ElasticSearchInput,
     searchConfig: DeepRequired<SearchConfig>,
     channelId: ID,
+    languageCode: LanguageCode,
     enabledOnly: boolean = false,
 ): SearchRequestBody {
     const {
         term,
         facetValueIds,
+        facetValueOperator,
         collectionId,
+        collectionSlug,
         groupByProduct,
         skip,
         take,
@@ -29,6 +32,7 @@ export function buildElasticBody(
     };
     ensureBoolFilterExists(query);
     query.bool.filter.push({ term: { channelId } });
+    query.bool.filter.push({ term: { languageCode } });
 
     if (term) {
         query.bool.must = [
@@ -48,13 +52,20 @@ export function buildElasticBody(
     }
     if (facetValueIds && facetValueIds.length) {
         ensureBoolFilterExists(query);
-        query.bool.filter = query.bool.filter.concat(
-            facetValueIds.map(id => ({ term: { facetValueIds: id } })),
-        );
+        const operator = facetValueOperator === LogicalOperator.AND ? 'must' : 'should';
+        query.bool.filter = query.bool.filter.concat([
+            {
+                bool: { [operator]: facetValueIds.map(id => ({ term: { facetValueIds: id } })) },
+            },
+        ]);
     }
     if (collectionId) {
         ensureBoolFilterExists(query);
         query.bool.filter.push({ term: { collectionIds: collectionId } });
+    }
+    if (collectionSlug) {
+        ensureBoolFilterExists(query);
+        query.bool.filter.push({ term: { collectionSlugs: collectionSlug } });
     }
     if (enabledOnly) {
         ensureBoolFilterExists(query);
@@ -84,7 +95,9 @@ export function buildElasticBody(
         }
     }
     return {
-        query,
+        query: searchConfig.mapQuery
+            ? searchConfig.mapQuery(query, input, searchConfig, channelId, enabledOnly)
+            : query,
         sort: sortArray,
         from: skip || 0,
         size: take || 10,

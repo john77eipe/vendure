@@ -1,14 +1,36 @@
 // Jest Snapshot v1, https://goo.gl/fbAQLP
 
-exports[`addGraphQLCustomFields() extends a type 1`] = `
-"scalar DateTime
+exports[`addGraphQLCustomFields() extends OrderAddress if Address custom fields defined 1`] = `
+"type Address {
+  id: ID
+  streetLine1: String
+  customFields: AddressCustomFields
+}
+
+type OrderAddress {
+  streetLine1: String
+  customFields: AddressCustomFields
+}
 
 scalar JSON
 
-type Product {
+scalar DateTime
+
+type AddressCustomFields {
+  instructions: String
+}
+"
+`;
+
+exports[`addGraphQLCustomFields() extends a type 1`] = `
+"type Product {
   id: ID
   customFields: ProductCustomFields
 }
+
+scalar JSON
+
+scalar DateTime
 
 type ProductCustomFields {
   available: Boolean
@@ -17,32 +39,9 @@ type ProductCustomFields {
 `;
 
 exports[`addGraphQLCustomFields() extends a type with FilterParameters 1`] = `
-"input BooleanOperators {
-  eq: Boolean
-}
-
-input DateOperators {
-  eq: String
-}
-
-scalar DateTime
-
-scalar JSON
-
-input NumberOperators {
-  eq: Float
-}
-
-type Product {
+"type Product {
   name: String
   customFields: ProductCustomFields
-}
-
-type ProductCustomFields {
-  available: Boolean
-  shortName: String
-  rating: Float
-  published: DateTime
 }
 
 input ProductFilterParameter {
@@ -56,22 +55,36 @@ input ProductFilterParameter {
 input StringOperators {
   eq: String
 }
-"
-`;
 
-exports[`addGraphQLCustomFields() extends a type with SortParameters 1`] = `
-"scalar DateTime
+input NumberOperators {
+  eq: Float
+}
+
+input DateOperators {
+  eq: String
+}
+
+input BooleanOperators {
+  eq: Boolean
+}
 
 scalar JSON
 
-type Product {
-  id: ID
-  customFields: ProductCustomFields
-}
+scalar DateTime
 
 type ProductCustomFields {
   available: Boolean
   shortName: String
+  rating: Float
+  published: DateTime
+}
+"
+`;
+
+exports[`addGraphQLCustomFields() extends a type with SortParameters 1`] = `
+"type Product {
+  id: ID
+  customFields: ProductCustomFields
 }
 
 input ProductSortParameter {
@@ -84,12 +97,22 @@ enum SortOrder {
   ASC
   DESC
 }
+
+scalar JSON
+
+scalar DateTime
+
+type ProductCustomFields {
+  available: Boolean
+  shortName: String
+}
 "
 `;
 
 exports[`addGraphQLCustomFields() extends a type with a Create input 1`] = `
-"input CreateProductCustomFieldsInput {
-  available: Boolean
+"type Product {
+  id: ID
+  customFields: ProductCustomFields
 }
 
 input CreateProductInput {
@@ -97,25 +120,35 @@ input CreateProductInput {
   customFields: CreateProductCustomFieldsInput
 }
 
-scalar DateTime
-
 scalar JSON
 
-type Product {
-  id: ID
-  customFields: ProductCustomFields
-}
+scalar DateTime
 
 type ProductCustomFields {
   available: Boolean
   shortName: String
+}
+
+input CreateProductCustomFieldsInput {
+  available: Boolean
 }
 "
 `;
 
 exports[`addGraphQLCustomFields() extends a type with a Create input and a translation 1`] = `
-"input CreateProductCustomFieldsInput {
-  available: Boolean
+"type Product {
+  id: ID
+  customFields: ProductCustomFields
+}
+
+type ProductTranslation {
+  id: ID
+  customFields: ProductTranslationCustomFields
+}
+
+input ProductTranslationInput {
+  id: ID
+  customFields: ProductTranslationInputCustomFields
 }
 
 input CreateProductInput {
@@ -123,59 +156,48 @@ input CreateProductInput {
   customFields: CreateProductCustomFieldsInput
 }
 
-scalar DateTime
-
 scalar JSON
 
-type Product {
-  id: ID
-  customFields: ProductCustomFields
-}
+scalar DateTime
 
 type ProductCustomFields {
   available: Boolean
   shortName: String
-}
-
-type ProductTranslation {
-  id: ID
-  customFields: ProductTranslationCustomFields
 }
 
 type ProductTranslationCustomFields {
   shortName: String
 }
 
-input ProductTranslationCustomFieldsInput {
-  shortName: String
+input CreateProductCustomFieldsInput {
+  available: Boolean
 }
 
-input ProductTranslationInput {
-  id: ID
-  customFields: ProductTranslationCustomFieldsInput
+input ProductTranslationInputCustomFields {
+  shortName: String
 }
 "
 `;
 
 exports[`addGraphQLCustomFields() extends a type with a translation 1`] = `
-"scalar DateTime
-
-scalar JSON
-
-type Product {
+"type Product {
   id: ID
   translations: [ProductTranslation!]!
   customFields: ProductCustomFields
 }
 
-type ProductCustomFields {
-  available: Boolean
-  shortName: String
-}
-
 type ProductTranslation {
   id: ID
   customFields: ProductTranslationCustomFields
+}
+
+scalar JSON
+
+scalar DateTime
+
+type ProductCustomFields {
+  available: Boolean
+  shortName: String
 }
 
 type ProductTranslationCustomFields {
@@ -185,14 +207,19 @@ type ProductTranslationCustomFields {
 `;
 
 exports[`addGraphQLCustomFields() extends a type with an Update input 1`] = `
-"scalar DateTime
-
-scalar JSON
-
-type Product {
+"type Product {
   id: ID
   customFields: ProductCustomFields
 }
+
+input UpdateProductInput {
+  image: String
+  customFields: UpdateProductCustomFieldsInput
+}
+
+scalar JSON
+
+scalar DateTime
 
 type ProductCustomFields {
   available: Boolean
@@ -202,23 +229,18 @@ type ProductCustomFields {
 input UpdateProductCustomFieldsInput {
   available: Boolean
 }
-
-input UpdateProductInput {
-  image: String
-  customFields: UpdateProductCustomFieldsInput
-}
 "
 `;
 
 exports[`addGraphQLCustomFields() publicOnly = true 1`] = `
-"scalar DateTime
-
-scalar JSON
-
-type Product {
+"type Product {
   id: ID
   customFields: ProductCustomFields
 }
+
+scalar JSON
+
+scalar DateTime
 
 type ProductCustomFields {
   available: Boolean
@@ -227,14 +249,14 @@ type ProductCustomFields {
 `;
 
 exports[`addGraphQLCustomFields() uses JSON scalar if no custom fields defined 1`] = `
-"scalar DateTime
-
-scalar JSON
-
-type Product {
+"type Product {
   id: ID
   customFields: JSON
 }
+
+scalar JSON
+
+scalar DateTime
 "
 `;
 
@@ -253,6 +275,28 @@ exports[`addOrderLineCustomFieldsInput() Modifies the schema when the addItemToO
 
 input OrderLineCustomFieldsInput {
   giftWrap: Boolean
+  message: String
+}
+"
+`;
+
+exports[`addRegisterCustomerCustomFieldsInput() add public writable custom fields to RegisterCustomerInput 1`] = `
+"input RegisterCustomerInput {
+  emailAddress: String!
+  title: String
+  firstName: String
+  lastName: String
+  phoneNumber: String
+  password: String
+  customFields: RegisterCustomerCustomFieldsInput
+}
+
+type Mutation {
+  registerCustomerAccount(input: RegisterCustomerInput!): Boolean!
+}
+
+input RegisterCustomerCustomFieldsInput {
+  isB2B: Boolean
   message: String
 }
 "

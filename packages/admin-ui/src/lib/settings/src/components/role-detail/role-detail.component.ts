@@ -2,12 +2,20 @@ import { ChangeDetectionStrategy, ChangeDetectorRef, Component, OnDestroy, OnIni
 import { FormBuilder, FormGroup, Validators } from '@angular/forms';
 import { ActivatedRoute, Router } from '@angular/router';
 import { marker as _ } from '@biesbjerg/ngx-translate-extract-marker';
-import { BaseDetailComponent } from '@vendure/admin-ui/core';
-import { CreateRoleInput, LanguageCode, Permission, Role, UpdateRoleInput } from '@vendure/admin-ui/core';
-import { NotificationService } from '@vendure/admin-ui/core';
-import { DataService } from '@vendure/admin-ui/core';
-import { ServerConfigService } from '@vendure/admin-ui/core';
+import {
+    BaseDetailComponent,
+    CreateRoleInput,
+    DataService,
+    LanguageCode,
+    NotificationService,
+    Permission,
+    PermissionDefinition,
+    Role,
+    ServerConfigService,
+    UpdateRoleInput,
+} from '@vendure/admin-ui/core';
 import { normalizeString } from '@vendure/common/lib/normalize-string';
+import { unique } from '@vendure/common/lib/unique';
 import { Observable } from 'rxjs';
 import { mergeMap, take } from 'rxjs/operators';
 
@@ -20,8 +28,7 @@ import { mergeMap, take } from 'rxjs/operators';
 export class RoleDetailComponent extends BaseDetailComponent<Role> implements OnInit, OnDestroy {
     role$: Observable<Role>;
     detailForm: FormGroup;
-    permissions: { [K in Permission]: boolean };
-    permissionsChanged = false;
+    permissionDefinitions: PermissionDefinition[];
     constructor(
         router: Router,
         route: ActivatedRoute,
@@ -32,20 +39,18 @@ export class RoleDetailComponent extends BaseDetailComponent<Role> implements On
         private notificationService: NotificationService,
     ) {
         super(route, router, serverConfigService, dataService);
-        this.permissions = Object.keys(Permission).reduce(
-            (result, key) => ({ ...result, [key]: false }),
-            {} as { [K in Permission]: boolean },
-        );
         this.detailForm = this.formBuilder.group({
             code: ['', Validators.required],
             description: ['', Validators.required],
             channelIds: [],
+            permissions: [],
         });
     }
 
     ngOnInit() {
         this.init();
         this.role$ = this.entity$;
+        this.permissionDefinitions = this.serverConfigService.getPermissionDefinitions();
     }
 
     ngOnDestroy(): void {
@@ -60,27 +65,29 @@ export class RoleDetailComponent extends BaseDetailComponent<Role> implements On
     }
 
     setPermission(change: { permission: string; value: boolean }) {
-        this.permissions = { ...this.permissions, [change.permission]: change.value };
-        this.permissionsChanged = true;
+        const permissionsControl = this.detailForm.get('permissions');
+        if (permissionsControl) {
+            const currentPermissions = permissionsControl.value as string[];
+            const newValue =
+                change.value === true
+                    ? unique([...currentPermissions, change.permission])
+                    : currentPermissions.filter(p => p !== change.permission);
+            permissionsControl.setValue(newValue);
+            permissionsControl.markAsDirty();
+        }
     }
 
     create() {
         const formValue = this.detailForm.value;
-        const role: CreateRoleInput = {
-            code: formValue.code,
-            description: formValue.description,
-            permissions: this.getSelectedPermissions(),
-            channelIds: formValue.channelIds,
-        };
+        const role: CreateRoleInput = formValue;
         this.dataService.administrator.createRole(role).subscribe(
-            (data) => {
+            data => {
                 this.notificationService.success(_('common.notify-create-success'), { entity: 'Role' });
                 this.detailForm.markAsPristine();
                 this.changeDetector.markForCheck();
-                this.permissionsChanged = false;
                 this.router.navigate(['../', data.createRole.id], { relativeTo: this.route });
             },
-            (err) => {
+            err => {
                 this.notificationService.error(_('common.notify-create-error'), {
                     entity: 'Role',
                 });
@@ -94,24 +101,17 @@ export class RoleDetailComponent extends BaseDetailComponent<Role> implements On
                 take(1),
                 mergeMap(({ id }) => {
                     const formValue = this.detailForm.value;
-                    const role: UpdateRoleInput = {
-                        id,
-                        code: formValue.code,
-                        description: formValue.description,
-                        permissions: this.getSelectedPermissions(),
-                        channelIds: formValue.channelIds,
-                    };
+                    const role: UpdateRoleInput = { id, ...formValue };
                     return this.dataService.administrator.updateRole(role);
                 }),
             )
             .subscribe(
-                (data) => {
+                data => {
                     this.notificationService.success(_('common.notify-update-success'), { entity: 'Role' });
                     this.detailForm.markAsPristine();
                     this.changeDetector.markForCheck();
-                    this.permissionsChanged = false;
                 },
-                (err) => {
+                err => {
                     this.notificationService.error(_('common.notify-update-error'), {
                         entity: 'Role',
                     });
@@ -123,14 +123,12 @@ export class RoleDetailComponent extends BaseDetailComponent<Role> implements On
         this.detailForm.patchValue({
             description: role.description,
             code: role.code,
-            channelIds: role.channels.map((c) => c.id),
+            channelIds: role.channels.map(c => c.id),
+            permissions: role.permissions,
         });
-        for (const permission of Object.keys(this.permissions)) {
-            this.permissions[permission] = role.permissions.includes(permission as Permission);
-        }
-    }
-
-    private getSelectedPermissions(): Permission[] {
-        return Object.keys(this.permissions).filter((p) => this.permissions[p]) as Permission[];
+        // This was required to get the channel selector component to
+        // correctly display its contents. A while spent debugging the root
+        // cause did not yield a solution, therefore this next line.
+        this.changeDetector.detectChanges();
     }
 }

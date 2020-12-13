@@ -1,19 +1,17 @@
 import { LanguageCode } from '@vendure/common/lib/generated-types';
 import { ID, JsonCompatible } from '@vendure/common/lib/shared-types';
+import { isObject } from '@vendure/common/lib/shared-utils';
+import { Request } from 'express';
 import { TFunction } from 'i18next';
 
+import { CachedSession } from '../../config/session-cache/session-cache-strategy';
 import { Channel } from '../../entity/channel/channel.entity';
-import { AnonymousSession } from '../../entity/session/anonymous-session.entity';
-import { AuthenticatedSession } from '../../entity/session/authenticated-session.entity';
-import { Session } from '../../entity/session/session.entity';
-import { User } from '../../entity/user/user.entity';
 
 import { ApiType } from './get-api-type';
 
 export type SerializedRequestContext = {
-    _session: JsonCompatible<Session> & {
-        user: JsonCompatible<User>;
-    };
+    _req?: any;
+    _session: JsonCompatible<Required<CachedSession>>;
     _apiType: ApiType;
     _channel: JsonCompatible<Channel>;
     _languageCode: LanguageCode;
@@ -26,30 +24,47 @@ export type SerializedRequestContext = {
  * The RequestContext holds information relevant to the current request, which may be
  * required at various points of the stack.
  *
+ * It is a good practice to inject the RequestContext (using the {@link Ctx} decorator) into
+ * _all_ resolvers & REST handlers, and then pass it through to the service layer.
+ *
+ * This allows the service layer to access information about the current user, the active language,
+ * the active Channel, and so on. In addition, the {@link TransactionalConnection} relies on the
+ * presence of the RequestContext object in order to correctly handle per-request database transactions.
+ *
+ * @example
+ * ```TypeScript
+ * \@Query()
+ * myQuery(\@Ctx() ctx: RequestContext) {
+ *   return this.myService.getData(ctx);
+ * }
+ * ```
  * @docsCategory request
  */
 export class RequestContext {
     private readonly _languageCode: LanguageCode;
     private readonly _channel: Channel;
-    private readonly _session?: Session;
+    private readonly _session?: CachedSession;
     private readonly _isAuthorized: boolean;
     private readonly _authorizedAsOwnerOnly: boolean;
     private readonly _translationFn: TFunction;
     private readonly _apiType: ApiType;
+    private readonly _req?: Request;
 
     /**
      * @internal
      */
     constructor(options: {
+        req?: Request;
         apiType: ApiType;
         channel: Channel;
-        session?: Session;
+        session?: CachedSession;
         languageCode?: LanguageCode;
         isAuthorized: boolean;
         authorizedAsOwnerOnly: boolean;
         translationFn?: TFunction;
     }) {
-        const { apiType, channel, session, languageCode, translationFn } = options;
+        const { req, apiType, channel, session, languageCode, translationFn } = options;
+        this._req = req;
         this._apiType = apiType;
         this._channel = channel;
         this._session = session;
@@ -61,40 +76,83 @@ export class RequestContext {
 
     /**
      * @description
-     * Creates a new RequestContext object from a plain object which is the result of
-     * a JSON serialization - deserialization operation.
+     * Creates an "empty" RequestContext object. This is only intended to be used
+     * when a service method must be called outside the normal request-response
+     * cycle, e.g. when programmatically populating data.
+     */
+    static empty(): RequestContext {
+        return new RequestContext({
+            apiType: 'admin',
+            authorizedAsOwnerOnly: false,
+            channel: new Channel(),
+            isAuthorized: true,
+        });
+    }
+
+    /**
+     * @description
+     * Creates a new RequestContext object from a serialized object created by the
+     * `serialize()` method.
      */
     static deserialize(ctxObject: SerializedRequestContext): RequestContext {
-        let session: Session | undefined;
-        if (ctxObject._session) {
-            if (ctxObject._session.user) {
-                const user = new User(ctxObject._session.user);
-                session = new AuthenticatedSession({
-                    ...ctxObject._session,
-                    user,
-                });
-            } else {
-                session = new AnonymousSession(ctxObject._session);
-            }
-        }
         return new RequestContext({
+            req: ctxObject._req as any,
             apiType: ctxObject._apiType,
             channel: new Channel(ctxObject._channel),
-            session,
+            session: {
+                ...ctxObject._session,
+                expires: ctxObject._session?.expires && new Date(ctxObject._session.expires),
+            },
             languageCode: ctxObject._languageCode,
             isAuthorized: ctxObject._isAuthorized,
             authorizedAsOwnerOnly: ctxObject._authorizedAsOwnerOnly,
         });
     }
 
+    /**
+     * @description
+     * Serializes the RequestContext object into a JSON-compatible simple object.
+     * This is useful when you need to send a RequestContext object to another
+     * process, e.g. to pass it to the Worker process via the {@link WorkerService}.
+     */
     serialize(): SerializedRequestContext {
-        return JSON.parse(JSON.stringify(this));
+        const serializableThis: any = Object.assign({}, this);
+        if (this._req) {
+            serializableThis._req = this.shallowCloneRequestObject(this._req);
+        }
+        return JSON.parse(JSON.stringify(serializableThis));
     }
 
+    /**
+     * @description
+     * Creates a shallow copy of the RequestContext instance. This means that
+     * mutations to the copy itself will not affect the original, but deep mutations
+     * (e.g. copy.channel.code = 'new') *will* also affect the original.
+     */
+    copy(): RequestContext {
+        return Object.assign(Object.create(Object.getPrototypeOf(this)), this);
+    }
+
+    /**
+     * @description
+     * The raw Express request object.
+     */
+    get req(): Request | undefined {
+        return this._req;
+    }
+
+    /**
+     * @description
+     * Signals which API this request was received by, e.g. `admin` or `shop`.
+     */
     get apiType(): ApiType {
         return this._apiType;
     }
 
+    /**
+     * @description
+     * The active {@link Channel} of this request.
+     */
     get channel(): Channel {
         return this._channel;
     }
@@ -107,23 +165,12 @@ export class RequestContext {
         return this._languageCode;
     }
 
-    get session(): Session | undefined {
+    get session(): CachedSession | undefined {
         return this._session;
     }
 
     get activeUserId(): ID | undefined {
-        const user = this.activeUser;
-        if (user) {
-            return user.id;
-        }
-    }
-
-    get activeUser(): User | undefined {
-        if (this.session) {
-            if (this.isAuthenticatedSession(this.session)) {
-                return this.session.user;
-            }
-        }
+        return this.session?.user?.id;
     }
 
     /**
@@ -155,7 +202,32 @@ export class RequestContext {
         }
     }
 
-    private isAuthenticatedSession(session: Session): session is AuthenticatedSession {
-        return session.hasOwnProperty('user');
+    /**
+     * The Express "Request" object is huge and contains many circular
+     * references. We will preserve just a subset of the whole, by preserving
+     * only the serializable properties up to 2 levels deep.
+     * @private
+     */
+    private shallowCloneRequestObject(req: Request) {
+        function copySimpleFieldsToDepth(target: any, maxDepth: number, depth: number = 0) {
+            const result: any = {};
+            // tslint:disable-next-line:forin
+            for (const key in target) {
+                if (key === 'host' && depth === 0) {
+                    // avoid Express "deprecated: req.host" warning
+                    continue;
+                }
+                const val = (target as any)[key];
+                if (!isObject(val) && typeof val !== 'function') {
+                    result[key] = val;
+                } else if (depth < maxDepth) {
+                    depth++;
+                    result[key] = copySimpleFieldsToDepth(val, maxDepth, depth);
+                    depth--;
+                }
+            }
+            return result;
+        }
+        return copySimpleFieldsToDepth(req, 1);
     }
 }
