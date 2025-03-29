@@ -1,4 +1,4 @@
-import { Injectable, OnModuleInit } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import {
     CreateZoneInput,
     DeletionResponse,
@@ -7,49 +7,110 @@ import {
     MutationRemoveMembersFromZoneArgs,
     UpdateZoneInput,
 } from '@vendure/common/lib/generated-types';
-import { ID } from '@vendure/common/lib/shared-types';
+import { ID, PaginatedList } from '@vendure/common/lib/shared-types';
 import { unique } from '@vendure/common/lib/unique';
+import { In } from 'typeorm';
 
 import { RequestContext } from '../../api/common/request-context';
+import { createSelfRefreshingCache, SelfRefreshingCache } from '../../common/self-refreshing-cache';
+import { ListQueryOptions } from '../../common/types/common-types';
 import { assertFound } from '../../common/utils';
+import { ConfigService } from '../../config/config.service';
+import { TransactionalConnection } from '../../connection/transactional-connection';
 import { Channel, TaxRate } from '../../entity';
-import { Country } from '../../entity/country/country.entity';
+import { Country } from '../../entity/region/country.entity';
 import { Zone } from '../../entity/zone/zone.entity';
+import { EventBus } from '../../event-bus';
+import { ZoneEvent } from '../../event-bus/events/zone-event';
+import { ZoneMembersEvent } from '../../event-bus/events/zone-members-event';
+import { ListQueryBuilder } from '../helpers/list-query-builder/list-query-builder';
+import { TranslatorService } from '../helpers/translator/translator.service';
 import { patchEntity } from '../helpers/utils/patch-entity';
-import { translateDeep } from '../helpers/utils/translate-entity';
-import { TransactionalConnection } from '../transaction/transactional-connection';
 
+/**
+ * @description
+ * Contains methods relating to {@link Zone} entities.
+ *
+ * @docsCategory services
+ */
 @Injectable()
-export class ZoneService implements OnModuleInit {
+export class ZoneService {
     /**
      * We cache all Zones to avoid hitting the DB many times per request.
      */
-    private zones: Zone[] = [];
-    constructor(private connection: TransactionalConnection) {}
+    private zones: SelfRefreshingCache<Zone[], [RequestContext]>;
+    constructor(
+        private connection: TransactionalConnection,
+        private configService: ConfigService,
+        private eventBus: EventBus,
+        private translator: TranslatorService,
+        private listQueryBuilder: ListQueryBuilder,
+    ) {}
 
-    onModuleInit() {
-        return this.updateZonesCache();
+    /** @internal */
+    async initZones() {
+        await this.ensureCacheExists();
     }
 
-    findAll(ctx: RequestContext): Zone[] {
-        return this.zones.map(zone => {
-            zone.members = zone.members.map(country => translateDeep(country, ctx.languageCode));
-            return zone;
+    /**
+     * Creates a zones cache, that can be used to reduce number of zones queries to database
+     *
+     * @internal
+     */
+    async createCache(): Promise<SelfRefreshingCache<Zone[], [RequestContext]>> {
+        return await createSelfRefreshingCache({
+            name: 'ZoneService.zones',
+            ttl: this.configService.entityOptions.zoneCacheTtl,
+            refresh: {
+                fn: ctx =>
+                    this.connection.getRepository(ctx, Zone).find({
+                        relations: ['members'],
+                    }),
+                defaultArgs: [RequestContext.empty()],
+            },
         });
+    }
+
+    async findAll(ctx: RequestContext, options?: ListQueryOptions<Zone>): Promise<PaginatedList<Zone>> {
+        return this.listQueryBuilder
+            .build(Zone, options, { relations: ['members'], ctx })
+            .getManyAndCount()
+            .then(([items, totalItems]) => {
+                const translated = items.map((zone, i) => {
+                    const cloneZone = { ...zone };
+                    cloneZone.members = zone.members.map(country => this.translator.translate(country, ctx));
+                    return cloneZone;
+                });
+                return {
+                    items: translated,
+                    totalItems,
+                };
+            });
     }
 
     findOne(ctx: RequestContext, zoneId: ID): Promise<Zone | undefined> {
         return this.connection
             .getRepository(ctx, Zone)
-            .findOne(zoneId, {
+            .findOne({
+                where: { id: zoneId },
                 relations: ['members'],
             })
             .then(zone => {
                 if (zone) {
-                    zone.members = zone.members.map(country => translateDeep(country, ctx.languageCode));
+                    zone.members = zone.members.map(country => this.translator.translate(country, ctx));
                     return zone;
                 }
             });
+    }
+
+    async getAllWithMembers(ctx: RequestContext): Promise<Zone[]> {
+        return this.zones.memoize([], [ctx], zones => {
+            return zones.map((zone, i) => {
+                const cloneZone = { ...zone };
+                cloneZone.members = zone.members.map(country => this.translator.translate(country, ctx));
+                return cloneZone;
+            });
+        });
     }
 
     async create(ctx: RequestContext, input: CreateZoneInput): Promise<Zone> {
@@ -58,7 +119,8 @@ export class ZoneService implements OnModuleInit {
             zone.members = await this.getCountriesFromIds(ctx, input.memberIds);
         }
         const newZone = await this.connection.getRepository(ctx, Zone).save(zone);
-        await this.updateZonesCache(ctx);
+        await this.zones.refresh(ctx);
+        await this.eventBus.publish(new ZoneEvent(ctx, newZone, 'created', input));
         return assertFound(this.findOne(ctx, newZone.id));
     }
 
@@ -66,13 +128,14 @@ export class ZoneService implements OnModuleInit {
         const zone = await this.connection.getEntityOrThrow(ctx, Zone, input.id);
         const updatedZone = patchEntity(zone, input);
         await this.connection.getRepository(ctx, Zone).save(updatedZone, { reload: false });
-        await this.updateZonesCache(ctx);
+        await this.zones.refresh(ctx);
+        await this.eventBus.publish(new ZoneEvent(ctx, zone, 'updated', input));
         return assertFound(this.findOne(ctx, zone.id));
     }
 
     async delete(ctx: RequestContext, id: ID): Promise<DeletionResponse> {
         const zone = await this.connection.getEntityOrThrow(ctx, Zone, id);
-
+        const deletedZone = new Zone(zone);
         const channelsUsingZone = await this.connection
             .getRepository(ctx, Channel)
             .createQueryBuilder('channel')
@@ -104,7 +167,8 @@ export class ZoneService implements OnModuleInit {
             };
         } else {
             await this.connection.getRepository(ctx, Zone).remove(zone);
-            await this.updateZonesCache(ctx);
+            await this.zones.refresh(ctx);
+            await this.eventBus.publish(new ZoneEvent(ctx, deletedZone, 'deleted', id));
             return {
                 result: DeletionResult.DELETED,
                 message: '',
@@ -112,42 +176,48 @@ export class ZoneService implements OnModuleInit {
         }
     }
 
-    async addMembersToZone(ctx: RequestContext, input: MutationAddMembersToZoneArgs): Promise<Zone> {
-        const countries = await this.getCountriesFromIds(ctx, input.memberIds);
-        const zone = await this.connection.getEntityOrThrow(ctx, Zone, input.zoneId, {
+    async addMembersToZone(
+        ctx: RequestContext,
+        { memberIds, zoneId }: MutationAddMembersToZoneArgs,
+    ): Promise<Zone> {
+        const countries = await this.getCountriesFromIds(ctx, memberIds);
+        const zone = await this.connection.getEntityOrThrow(ctx, Zone, zoneId, {
             relations: ['members'],
         });
         const members = unique(zone.members.concat(countries), 'id');
         zone.members = members;
         await this.connection.getRepository(ctx, Zone).save(zone, { reload: false });
-        await this.updateZonesCache(ctx);
+        await this.zones.refresh(ctx);
+        await this.eventBus.publish(new ZoneMembersEvent(ctx, zone, 'assigned', memberIds));
         return assertFound(this.findOne(ctx, zone.id));
     }
 
     async removeMembersFromZone(
         ctx: RequestContext,
-        input: MutationRemoveMembersFromZoneArgs,
+        { memberIds, zoneId }: MutationRemoveMembersFromZoneArgs,
     ): Promise<Zone> {
-        const zone = await this.connection.getEntityOrThrow(ctx, Zone, input.zoneId, {
+        const zone = await this.connection.getEntityOrThrow(ctx, Zone, zoneId, {
             relations: ['members'],
         });
-        zone.members = zone.members.filter(country => !input.memberIds.includes(country.id));
+        zone.members = zone.members.filter(country => !memberIds.includes(country.id));
         await this.connection.getRepository(ctx, Zone).save(zone, { reload: false });
-        await this.updateZonesCache(ctx);
+        await this.zones.refresh(ctx);
+        await this.eventBus.publish(new ZoneMembersEvent(ctx, zone, 'removed', memberIds));
         return assertFound(this.findOne(ctx, zone.id));
     }
 
     private getCountriesFromIds(ctx: RequestContext, ids: ID[]): Promise<Country[]> {
-        return this.connection.getRepository(ctx, Country).findByIds(ids);
+        return this.connection.getRepository(ctx, Country).find({ where: { id: In(ids) } });
     }
 
     /**
-     * TODO: This is not good for multi-instance deployments. A better solution will
-     * need to be found without adversely affecting performance.
+     * Ensures zones cache exists. If not, this method creates one.
      */
-    async updateZonesCache(ctx?: RequestContext) {
-        this.zones = await this.connection.getRepository(ctx, Zone).find({
-            relations: ['members'],
-        });
+    private async ensureCacheExists() {
+        if (this.zones) {
+            return;
+        }
+
+        this.zones = await this.createCache();
     }
 }

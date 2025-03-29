@@ -1,13 +1,34 @@
-import { ChangeDetectionStrategy, ChangeDetectorRef, Component, OnInit } from '@angular/core';
-import { FormBuilder, FormGroup, Validators } from '@angular/forms';
-import { ActivatedRoute, Router } from '@angular/router';
+import { ChangeDetectionStrategy, ChangeDetectorRef, Component, OnDestroy, OnInit } from '@angular/core';
+import { FormBuilder, Validators } from '@angular/forms';
 import { marker as _ } from '@biesbjerg/ngx-translate-extract-marker';
-import { BaseDetailComponent } from '@vendure/admin-ui/core';
-import { CustomFieldConfig, GlobalSettings, LanguageCode, Permission } from '@vendure/admin-ui/core';
-import { NotificationService } from '@vendure/admin-ui/core';
-import { DataService } from '@vendure/admin-ui/core';
-import { ServerConfigService } from '@vendure/admin-ui/core';
-import { switchMap, tap } from 'rxjs/operators';
+import {
+    DataService,
+    getCustomFieldsDefaults,
+    GetGlobalSettingsDetailDocument,
+    GlobalSettings,
+    LanguageCode,
+    NotificationService,
+    Permission,
+    TypedBaseDetailComponent,
+} from '@vendure/admin-ui/core';
+import { gql } from 'apollo-angular';
+import { switchMap, tap, withLatestFrom } from 'rxjs/operators';
+
+export const GET_GLOBAL_SETTINGS_DETAIL = gql`
+    query GetGlobalSettingsDetail {
+        globalSettings {
+            ...GlobalSettingsDetail
+        }
+    }
+    fragment GlobalSettingsDetail on GlobalSettings {
+        id
+        createdAt
+        updatedAt
+        availableLanguages
+        trackInventory
+        outOfStockThreshold
+    }
+`;
 
 @Component({
     selector: 'vdr-global-settings',
@@ -15,30 +36,27 @@ import { switchMap, tap } from 'rxjs/operators';
     styleUrls: ['./global-settings.component.scss'],
     changeDetection: ChangeDetectionStrategy.OnPush,
 })
-export class GlobalSettingsComponent extends BaseDetailComponent<GlobalSettings> implements OnInit {
-    detailForm: FormGroup;
-    customFields: CustomFieldConfig[];
+export class GlobalSettingsComponent
+    extends TypedBaseDetailComponent<typeof GetGlobalSettingsDetailDocument, 'globalSettings'>
+    implements OnInit, OnDestroy
+{
+    customFields = this.getCustomFieldConfig('GlobalSettings');
+    detailForm = this.formBuilder.group({
+        availableLanguages: [[] as LanguageCode[]],
+        trackInventory: false,
+        outOfStockThreshold: [0, Validators.required],
+        customFields: this.formBuilder.group(getCustomFieldsDefaults(this.customFields)),
+    });
     languageCodes = Object.values(LanguageCode);
+    readonly updatePermission = [Permission.UpdateSettings, Permission.UpdateGlobalSettings];
 
     constructor(
-        router: Router,
-        route: ActivatedRoute,
-        serverConfigService: ServerConfigService,
         private changeDetector: ChangeDetectorRef,
         protected dataService: DataService,
         private formBuilder: FormBuilder,
         private notificationService: NotificationService,
     ) {
-        super(route, router, serverConfigService, dataService);
-        this.customFields = this.getCustomFieldConfig('GlobalSettings');
-        this.detailForm = this.formBuilder.group({
-            availableLanguages: [''],
-            trackInventory: false,
-            outOfStockThreshold: [0, Validators.required],
-            customFields: this.formBuilder.group(
-                this.customFields.reduce((hash, field) => ({ ...hash, [field.name]: '' }), {}),
-            ),
-        });
+        super();
     }
 
     ngOnInit(): void {
@@ -53,8 +71,8 @@ export class GlobalSettingsComponent extends BaseDetailComponent<GlobalSettings>
         });
     }
 
-    customFieldIsSet(name: string): boolean {
-        return !!this.detailForm.get(['customFields', name]);
+    ngOnDestroy() {
+        this.destroy();
     }
 
     save() {
@@ -79,8 +97,14 @@ export class GlobalSettingsComponent extends BaseDetailComponent<GlobalSettings>
                     }
                 }),
                 switchMap(() => this.serverConfigService.refreshGlobalSettings()),
+                withLatestFrom(this.dataService.client.uiState().single$),
             )
-            .subscribe();
+            .subscribe(([{ globalSettings }, { uiState }]) => {
+                const availableLangs = globalSettings.availableLanguages;
+                if (availableLangs.length && !availableLangs.includes(uiState.contentLanguage)) {
+                    this.dataService.client.setContentLanguage(availableLangs[0]).subscribe();
+                }
+            });
     }
 
     protected setFormValues(entity: GlobalSettings, languageCode: LanguageCode): void {
@@ -90,16 +114,7 @@ export class GlobalSettingsComponent extends BaseDetailComponent<GlobalSettings>
             outOfStockThreshold: entity.outOfStockThreshold,
         });
         if (this.customFields.length) {
-            const customFieldsGroup = this.detailForm.get('customFields') as FormGroup;
-
-            for (const fieldDef of this.customFields) {
-                const key = fieldDef.name;
-                const value = (entity as any).customFields[key];
-                const control = customFieldsGroup.get(key);
-                if (control) {
-                    control.patchValue(value);
-                }
-            }
+            this.setCustomFieldFormValues(this.customFields, this.detailForm.get('customFields'), entity);
         }
     }
 }

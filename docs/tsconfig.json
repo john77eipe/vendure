@@ -1,12 +1,7 @@
 {
-  "extends": "../tsconfig",
+  // This file is not used in compilation. It is here just for a nice editor experience.
+  "extends": "@tsconfig/docusaurus/tsconfig.json",
   "compilerOptions": {
-    "module": "commonjs",
-    "lib": [
-      "es2017",
-      "dom"
-    ],
-    "target": "es5",
-    "sourceMap": true
+    "baseUrl": "."
   }
 }

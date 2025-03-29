@@ -3,46 +3,35 @@ import { ConfigService } from '@vendure/core';
 import { createTestEnvironment } from '@vendure/testing';
 import gql from 'graphql-tag';
 import path from 'path';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { vi } from 'vitest';
 
 import { initialData } from '../../../e2e-common/e2e-initial-data';
-import { TEST_SETUP_TIMEOUT_MS, testConfig } from '../../../e2e-common/test-config';
+import { testConfig, TEST_SETUP_TIMEOUT_MS } from '../../../e2e-common/test-config';
 
 import { TestPluginWithAllLifecycleHooks } from './fixtures/test-plugins/with-all-lifecycle-hooks';
 import { TestAPIExtensionPlugin } from './fixtures/test-plugins/with-api-extensions';
-import { TestPluginWithConfigAndBootstrap } from './fixtures/test-plugins/with-config-and-bootstrap';
+import { TestPluginWithConfig } from './fixtures/test-plugins/with-config';
+import { PluginWithGlobalProviders } from './fixtures/test-plugins/with-global-providers';
 import { TestLazyExtensionPlugin } from './fixtures/test-plugins/with-lazy-api-extensions';
+import { WithNewConfigObjectReferencePlugin } from './fixtures/test-plugins/with-new-config-object-reference';
 import { TestPluginWithProvider } from './fixtures/test-plugins/with-provider';
 import { TestRestPlugin } from './fixtures/test-plugins/with-rest-controller';
-import { TestProcessContextPlugin } from './fixtures/test-plugins/with-worker-controller';
 
 describe('Plugins', () => {
-    const bootstrapMockFn = jest.fn();
-    const onConstructorFn = jest.fn();
-    const beforeBootstrapFn = jest.fn();
-    const beforeWorkerBootstrapFn = jest.fn();
-    const onBootstrapFn = jest.fn();
-    const onWorkerBootstrapFn = jest.fn();
-    const onCloseFn = jest.fn();
-    const onWorkerCloseFn = jest.fn();
-
+    const onConstructorFn = vi.fn();
+    const activeConfig = testConfig();
     const { server, adminClient, shopClient } = createTestEnvironment({
-        ...testConfig,
+        ...activeConfig,
         plugins: [
-            TestPluginWithAllLifecycleHooks.init(
-                onConstructorFn,
-                beforeBootstrapFn,
-                beforeWorkerBootstrapFn,
-                onBootstrapFn,
-                onWorkerBootstrapFn,
-                onCloseFn,
-                onWorkerCloseFn,
-            ),
-            TestPluginWithConfigAndBootstrap.setup(bootstrapMockFn),
+            TestPluginWithAllLifecycleHooks.init(onConstructorFn),
+            TestPluginWithConfig.setup(),
             TestAPIExtensionPlugin,
             TestPluginWithProvider,
             TestLazyExtensionPlugin,
             TestRestPlugin,
-            TestProcessContextPlugin,
+            PluginWithGlobalProviders,
+            WithNewConfigObjectReferencePlugin,
         ],
     });
 
@@ -59,33 +48,21 @@ describe('Plugins', () => {
         await server.destroy();
     });
 
-    it('constructs one instance for each process', () => {
-        expect(onConstructorFn).toHaveBeenCalledTimes(2);
-    });
-
-    it('calls beforeVendureBootstrap', () => {
-        expect(beforeBootstrapFn).toHaveBeenCalledTimes(1);
-        expect(beforeBootstrapFn).toHaveBeenCalledWith(server.app);
-    });
-
-    it('calls beforeVendureWorkerBootstrap', () => {
-        expect(beforeWorkerBootstrapFn).toHaveBeenCalledTimes(1);
-        expect(beforeWorkerBootstrapFn).toHaveBeenCalledWith(server.worker);
-    });
-
-    it('calls onVendureBootstrap', () => {
-        expect(onBootstrapFn).toHaveBeenCalledTimes(1);
-    });
-
-    it('calls onWorkerVendureBootstrap', () => {
-        expect(onWorkerBootstrapFn).toHaveBeenCalledTimes(1);
-    });
-
     it('can modify the config in configure()', () => {
-        expect(bootstrapMockFn).toHaveBeenCalledTimes(1);
-        const configService: ConfigService = bootstrapMockFn.mock.calls[0][0];
+        const configService = server.app.get(ConfigService);
         expect(configService instanceof ConfigService).toBe(true);
         expect(configService.defaultLanguageCode).toBe(LanguageCode.zh);
+    });
+
+    // https://github.com/vendure-ecommerce/vendure/issues/2906
+    it('handles plugins that return new config object references', async () => {
+        const configService = server.app.get(ConfigService);
+        expect(configService.customFields.Customer).toEqual([
+            {
+                name: 'testField',
+                type: 'string',
+            },
+        ]);
     });
 
     it('extends the admin API', async () => {
@@ -104,6 +81,22 @@ describe('Plugins', () => {
             }
         `);
         expect(result.baz).toEqual(['quux']);
+    });
+
+    it('custom scalar', async () => {
+        const result = await adminClient.query(gql`
+            query {
+                barList(options: { skip: 0, take: 1 }) {
+                    items {
+                        id
+                        pizzaType
+                    }
+                }
+            }
+        `);
+        expect(result.barList).toEqual({
+            items: [{ id: 'T_1', pizzaType: 'Cheese pizza!' }],
+        });
     });
 
     it('allows lazy evaluation of API extension', async () => {
@@ -143,7 +136,7 @@ describe('Plugins', () => {
     });
 
     describe('REST plugins', () => {
-        const restControllerUrl = `http://localhost:${testConfig.apiOptions.port}/test`;
+        const restControllerUrl = `http://localhost:${activeConfig.apiOptions.port}/test`;
 
         it('public route', async () => {
             const response = await shopClient.fetch(restControllerUrl + '/public');
@@ -172,39 +165,6 @@ describe('Plugins', () => {
             expect(response.status).toBe(500);
             const result = await response.json();
             expect(result.message).toContain('uh oh!');
-        });
-    });
-
-    describe('processContext', () => {
-        it('server context', async () => {
-            const response = await shopClient.fetch(
-                `http://localhost:${testConfig.apiOptions.port}/process-context/server`,
-            );
-            const body = await response.text();
-
-            expect(body).toBe('true');
-        });
-        it('worker context', async () => {
-            const response = await shopClient.fetch(
-                `http://localhost:${testConfig.apiOptions.port}/process-context/worker`,
-            );
-            const body = await response.text();
-
-            expect(body).toBe('true');
-        });
-    });
-
-    describe('on app close', () => {
-        beforeAll(async () => {
-            await server.destroy();
-        });
-
-        it('calls onVendureClose', () => {
-            expect(onCloseFn).toHaveBeenCalled();
-        });
-
-        it('calls onWorkerVendureClose', () => {
-            expect(onWorkerCloseFn).toHaveBeenCalled();
         });
     });
 });

@@ -1,6 +1,6 @@
-import { ArgumentsHost, ExceptionFilter, HttpException } from '@nestjs/common';
+import { ArgumentsHost, Catch, ExceptionFilter, HttpException } from '@nestjs/common';
 
-import { Logger, LogLevel } from '../../config';
+import { ConfigService, Logger, LogLevel } from '../../config';
 import { HEALTH_CHECK_ROUTE } from '../../health-check/constants';
 import { I18nError } from '../../i18n/i18n-error';
 import { parseContext } from '../common/parse-context';
@@ -8,8 +8,14 @@ import { parseContext } from '../common/parse-context';
 /**
  * Logs thrown I18nErrors via the configured VendureLogger.
  */
+@Catch()
 export class ExceptionLoggerFilter implements ExceptionFilter {
-    catch(exception: Error | HttpException | I18nError, host: ArgumentsHost) {
+    constructor(private configService: ConfigService) {}
+
+    catch(exception: Error, host: ArgumentsHost) {
+        for (const handler of this.configService.systemOptions.errorHandlers) {
+            void handler.handleServerError(exception, { host });
+        }
         const { req, res, info, isGraphQL } = parseContext(host);
         let message = '';
         let statusCode = 500;
@@ -39,16 +45,21 @@ export class ExceptionLoggerFilter implements ExceptionFilter {
                     Logger.verbose(message);
                     break;
             }
+            if (exception.stack) {
+                Logger.debug(exception.stack);
+            }
+            if (isGraphQL) {
+                return exception;
+            }
         } else if (exception instanceof HttpException) {
             // Handle other Nestjs errors
             statusCode = exception.getStatus();
             message = exception.message;
-            let stack = exception.stack;
             if (statusCode === 404) {
-                message = exception.message;
-                stack = undefined;
+                Logger.verbose(exception.message);
+            } else {
+                Logger.error(message, undefined, exception.stack);
             }
-            Logger.error(message, undefined, stack);
         } else {
             Logger.error(exception.message, undefined, exception.stack);
         }

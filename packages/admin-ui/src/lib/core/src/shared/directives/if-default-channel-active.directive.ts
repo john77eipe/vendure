@@ -17,16 +17,16 @@ export class IfDefaultChannelActiveDirective extends IfDirectiveBase<[]> {
         private dataService: DataService,
         private changeDetectorRef: ChangeDetectorRef,
     ) {
-        super(_viewContainer, templateRef, () => {
-            return this.dataService.client
+        super(_viewContainer, templateRef, () =>
+            this.dataService.client
                 .userStatus()
                 .mapStream(({ userStatus }) => this.defaultChannelIsActive(userStatus))
-                .pipe(tap(() => this.changeDetectorRef.markForCheck()));
-        });
+                .pipe(tap(() => this.changeDetectorRef.markForCheck())),
+        );
     }
 
     /**
-     * A template to show if the current user does not have the speicified permission.
+     * A template to show if the current user does not have the specified permission.
      */
     @Input()
     set vdrIfMultichannelElse(templateRef: TemplateRef<any> | null) {

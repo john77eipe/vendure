@@ -10,6 +10,7 @@ export const SHIPPING_METHOD_FRAGMENT = gql`
         code
         name
         description
+        fulfillmentHandlerCode
         checker {
             ...ConfigurableOperation
         }
@@ -26,33 +27,15 @@ export const SHIPPING_METHOD_FRAGMENT = gql`
     ${CONFIGURABLE_OPERATION_FRAGMENT}
 `;
 
-export const GET_SHIPPING_METHOD_LIST = gql`
-    query GetShippingMethodList($options: ShippingMethodListOptions) {
-        shippingMethods(options: $options) {
-            items {
-                ...ShippingMethod
-            }
-            totalItems
-        }
-    }
-    ${SHIPPING_METHOD_FRAGMENT}
-`;
-
-export const GET_SHIPPING_METHOD = gql`
-    query GetShippingMethod($id: ID!) {
-        shippingMethod(id: $id) {
-            ...ShippingMethod
-        }
-    }
-    ${SHIPPING_METHOD_FRAGMENT}
-`;
-
 export const GET_SHIPPING_METHOD_OPERATIONS = gql`
     query GetShippingMethodOperations {
         shippingEligibilityCheckers {
             ...ConfigurableOperationDef
         }
         shippingCalculators {
+            ...ConfigurableOperationDef
+        }
+        fulfillmentHandlers {
             ...ConfigurableOperationDef
         }
     }
@@ -86,6 +69,15 @@ export const DELETE_SHIPPING_METHOD = gql`
     }
 `;
 
+export const DELETE_SHIPPING_METHODS = gql`
+    mutation DeleteShippingMethods($ids: [ID!]!) {
+        deleteShippingMethods(ids: $ids) {
+            result
+            message
+        }
+    }
+`;
+
 export const TEST_SHIPPING_METHOD = gql`
     query TestShippingMethod($input: TestShippingMethodInput!) {
         testShippingMethod(input: $input) {
@@ -104,6 +96,7 @@ export const TEST_ELIGIBLE_SHIPPING_METHODS = gql`
         testEligibleShippingMethods(input: $input) {
             id
             name
+            code
             description
             price
             priceWithTax

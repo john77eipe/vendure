@@ -1,6 +1,6 @@
-// tslint:disable-next-line:no-reference
+// eslint-disable-next-line @typescript-eslint/triple-slash-reference
 /// <reference path="../core/typings.d.ts" />
-import { bootstrap, defaultConfig, mergeConfig } from '@vendure/core';
+import { bootstrap, defaultConfig, JobQueueService, Logger, mergeConfig } from '@vendure/core';
 import { populate } from '@vendure/core/cli';
 import { clearAllTables, populateCustomers } from '@vendure/testing';
 import path from 'path';
@@ -9,7 +9,7 @@ import { initialData } from '../core/mock-data/data-sources/initial-data';
 
 import { devConfig } from './dev-config';
 
-// tslint:disable:no-console
+/* eslint-disable no-console */
 
 /**
  * A CLI script which populates the dev database with deterministic random data.
@@ -26,23 +26,24 @@ if (require.main === module) {
             importExportOptions: {
                 importAssetsDir: path.join(__dirname, '../core/mock-data/assets'),
             },
-            workerOptions: {
-                runInMainProcess: true,
-            },
             customFields: {},
         }),
     );
     clearAllTables(populateConfig, true)
         .then(() =>
             populate(
-                () => bootstrap(populateConfig),
+                () =>
+                    bootstrap(populateConfig).then(async app => {
+                        await app.get(JobQueueService).start();
+                        return app;
+                    }),
                 initialData,
                 path.join(__dirname, '../create/assets/products.csv'),
             ),
         )
         .then(async app => {
             console.log('populating customers...');
-            await populateCustomers(10, populateConfig, true);
+            await populateCustomers(app, 10, message => Logger.error(message));
             return app.close();
         })
         .then(

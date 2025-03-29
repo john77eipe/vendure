@@ -3,24 +3,34 @@ import { Reflector } from '@nestjs/core';
 import { Permission } from '@vendure/common/lib/generated-types';
 import { Request, Response } from 'express';
 
-import { REQUEST_CONTEXT_KEY } from '../../common/constants';
 import { ForbiddenError } from '../../common/error/errors';
 import { ConfigService } from '../../config/config.service';
+import { LogLevel } from '../../config/logger/vendure-logger';
 import { CachedSession } from '../../config/session-cache/session-cache-strategy';
 import { Customer } from '../../entity/customer/customer.entity';
+import { RequestContextService } from '../../service/helpers/request-context/request-context.service';
 import { ChannelService } from '../../service/services/channel.service';
 import { CustomerService } from '../../service/services/customer.service';
 import { SessionService } from '../../service/services/session.service';
 import { extractSessionToken } from '../common/extract-session-token';
+import { isFieldResolver } from '../common/is-field-resolver';
 import { parseContext } from '../common/parse-context';
-import { RequestContext } from '../common/request-context';
-import { RequestContextService } from '../common/request-context.service';
+import {
+    internal_getRequestContext,
+    internal_setRequestContext,
+    RequestContext,
+} from '../common/request-context';
 import { setSessionToken } from '../common/set-session-token';
 import { PERMISSIONS_METADATA_KEY } from '../decorators/allow.decorator';
 
 /**
- * A guard which checks for the existence of a valid session token in the request and if found,
+ * @description
+ * A guard which:
+ *
+ * 1. checks for the existence of a valid session token in the request and if found,
  * attaches the current User entity to the request.
+ * 2. enforces any permissions required by the target handler (resolver, field resolver or route),
+ * and throws a ForbiddenError if those permissions are not present.
  */
 @Injectable()
 export class AuthGuard implements CanActivate {
@@ -37,25 +47,40 @@ export class AuthGuard implements CanActivate {
 
     async canActivate(context: ExecutionContext): Promise<boolean> {
         const { req, res, info } = parseContext(context);
-        const authDisabled = this.configService.authOptions.disableAuth;
+        const targetIsFieldResolver = isFieldResolver(info);
         const permissions = this.reflector.get<Permission[]>(PERMISSIONS_METADATA_KEY, context.getHandler());
+        if (targetIsFieldResolver && !permissions) {
+            return true;
+        }
+        const authDisabled = this.configService.authOptions.disableAuth;
         const isPublic = !!permissions && permissions.includes(Permission.Public);
         const hasOwnerPermission = !!permissions && permissions.includes(Permission.Owner);
-        const session = await this.getSession(req, res, hasOwnerPermission);
-        let requestContext = await this.requestContextService.fromRequest(req, info, permissions, session);
-
-        const requestContextShouldBeReinitialized = await this.setActiveChannel(requestContext, session);
-        if (requestContextShouldBeReinitialized) {
+        let requestContext: RequestContext;
+        if (targetIsFieldResolver) {
+            requestContext = internal_getRequestContext(req);
+        } else {
+            const session = await this.getSession(req, res, hasOwnerPermission);
             requestContext = await this.requestContextService.fromRequest(req, info, permissions, session);
+
+            const requestContextShouldBeReinitialized = await this.setActiveChannel(requestContext, session);
+            if (requestContextShouldBeReinitialized) {
+                requestContext = await this.requestContextService.fromRequest(
+                    req,
+                    info,
+                    permissions,
+                    session,
+                );
+            }
+            internal_setRequestContext(req, requestContext, context);
         }
-        (req as any)[REQUEST_CONTEXT_KEY] = requestContext;
 
         if (authDisabled || !permissions || isPublic) {
             return true;
         } else {
-            const canActivate = requestContext.isAuthorized || requestContext.authorizedAsOwnerOnly;
+            const canActivate =
+                requestContext.userHasPermissions(permissions) || requestContext.authorizedAsOwnerOnly;
             if (!canActivate) {
-                throw new ForbiddenError();
+                throw new ForbiddenError(LogLevel.Verbose);
             } else {
                 return canActivate;
             }
@@ -84,9 +109,23 @@ export class AuthGuard implements CanActivate {
                 // To avoid assigning the customer to the active channel on every request,
                 // it is only done on the first request and whenever the channel changes
                 if (customer) {
-                    await this.channelService.assignToChannels(requestContext, Customer, customer.id, [
-                        requestContext.channelId,
-                    ]);
+                    try {
+                        await this.channelService.assignToChannels(requestContext, Customer, customer.id, [
+                            requestContext.channelId,
+                        ]);
+                    } catch (e: any) {
+                        const isDuplicateError =
+                            e.code === 'ER_DUP_ENTRY' /* mySQL/MariaDB */ ||
+                            e.code === '23505'; /* postgres */
+                        if (isDuplicateError) {
+                            // For a duplicate error, this means that concurrent requests have resulted in attempting to
+                            // assign the Customer to the channel more than once. In this case we can safely ignore the
+                            // error as the Customer was successfully assigned in the earlier call.
+                            // See https://github.com/vendure-ecommerce/vendure/issues/834
+                        } else {
+                            throw e;
+                        }
+                    }
                 }
             }
             return true;

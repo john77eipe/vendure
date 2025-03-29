@@ -1,15 +1,23 @@
-import { ModuleRef } from '@nestjs/core';
 import { JobListOptions } from '@vendure/common/lib/generated-types';
 import { ID, PaginatedList } from '@vendure/common/lib/shared-types';
 
-import { InjectableStrategy } from '../../common/types/injectable-strategy';
-import { Job } from '../../job-queue/job';
+import { InjectableStrategy } from '../../common';
+import { JobData, JobQueueStrategyJobOptions } from '../../job-queue';
+import { Job } from '../../job-queue';
+import { JobOptions } from '../../job-queue';
 
 /**
  * @description
  * Defines how the jobs in the {@link JobQueueService} are persisted and
  * accessed. Custom strategies can be defined to make use of external
  * services such as Redis.
+ *
+ * :::info
+ *
+ * This is configured via the `jobQueueOptions.jobQueueStrategy` property of
+ * your VendureConfig.
+ *
+ * :::
  *
  * @docsCategory JobQueue
  */
@@ -18,47 +26,23 @@ export interface JobQueueStrategy extends InjectableStrategy {
      * @description
      * Add a new job to the queue.
      */
-    add(job: Job): Promise<Job>;
+    add<Data extends JobData<Data> = object>(job: Job<Data>, jobOptions?: JobQueueStrategyJobOptions<Data>): Promise<Job<Data>>;
 
     /**
      * @description
-     * Should return the next job in the given queue. The implementation is
-     * responsible for returning the correct job according to the time of
-     * creation.
+     * Start the job queue
      */
-    next(queueName: string): Promise<Job | undefined>;
+    start<Data extends JobData<Data> = object>(
+        queueName: string,
+        process: (job: Job<Data>) => Promise<any>,
+    ): Promise<void>;
 
     /**
      * @description
-     * Update the job details in the store.
+     * Stops a queue from running. Its not guaranteed to stop immediately.
      */
-    update(job: Job): Promise<void>;
-
-    /**
-     * @description
-     * Returns a job by its id.
-     */
-    findOne(id: ID): Promise<Job | undefined>;
-
-    /**
-     * @description
-     * Returns a list of jobs according to the specified options.
-     */
-    findMany(options?: JobListOptions): Promise<PaginatedList<Job>>;
-
-    /**
-     * @description
-     * Returns an array of jobs for the given ids.
-     */
-    findManyById(ids: ID[]): Promise<Job[]>;
-
-    /**
-     * @description
-     * Remove all settled jobs in the specified queues older than the given date.
-     * If no queueName is passed, all queues will be considered. If no olderThan
-     * date is passed, all jobs older than the current time will be removed.
-     *
-     * Returns a promise of the number of jobs removed.
-     */
-    removeSettledJobs(queueNames?: string[], olderThan?: Date): Promise<number>;
+    stop<Data extends JobData<Data> = object>(
+        queueName: string,
+        process: (job: Job<Data>) => Promise<any>,
+    ): Promise<void>;
 }

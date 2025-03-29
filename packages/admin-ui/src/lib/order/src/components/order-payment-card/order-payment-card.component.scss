@@ -1,12 +1,24 @@
-@import "variables";
-
+:host {
+    display: block;
+}
 .payment-header {
     display: flex;
     justify-content: space-between;
     align-items: center;
+    line-break: anywhere;
 }
 
 .refund-icon {
-    margin-right: 6px;
-    color: $color-grey-400;
+    margin-inline-end: 6px;
+    color: var(--color-grey-400);
+}
+
+.card-footer {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+}
+
+.refund-wrapper {
+    font-size: var(--font-size-xs);
 }

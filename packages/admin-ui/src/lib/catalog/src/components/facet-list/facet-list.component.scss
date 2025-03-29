@@ -1,7 +1,7 @@
-@import "variables";
-
-td {
-    &.private {
-        background-color: $color-grey-200;
-    }
+.facet-values-list {
+    max-width: 500px;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px;
 }

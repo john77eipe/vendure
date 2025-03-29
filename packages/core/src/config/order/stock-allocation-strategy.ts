@@ -8,12 +8,19 @@ import { OrderState } from '../../service/helpers/order-state-machine/order-stat
  * This strategy is responsible for deciding at which stage in the order process
  * stock will be allocated.
  *
+ * :::info
+ *
+ * This is configured via the `orderOptions.stockAllocationStrategy` property of
+ * your VendureConfig.
+ *
+ * :::
+ *
  * @docsCategory orders
  */
 export interface StockAllocationStrategy extends InjectableStrategy {
     /**
      * @description
-     * This method is called whenever and Order transitions from one state to another.
+     * This method is called whenever an Order transitions from one state to another.
      * If it resolves to `true`, then stock will be allocated for this order.
      */
     shouldAllocateStock(

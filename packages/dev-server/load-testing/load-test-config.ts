@@ -1,53 +1,63 @@
-/* tslint:disable:no-console */
+/* eslint-disable no-console */
 import { AssetServerPlugin } from '@vendure/asset-server-plugin';
 import {
     defaultConfig,
+    DefaultJobQueuePlugin,
     DefaultLogger,
     DefaultSearchPlugin,
-    examplePaymentHandler,
+    dummyPaymentHandler,
     InMemorySessionCacheStrategy,
     LogLevel,
     mergeConfig,
-    NoopSessionCacheStrategy,
     VendureConfig,
 } from '@vendure/core';
 import path from 'path';
 
-export function getMysqlConnectionOptions(count: number) {
+export function getMysqlConnectionOptions(databaseName: string) {
     return {
         type: 'mysql' as const,
         host: '127.0.0.1',
         port: 3306,
         username: 'root',
         password: '',
-        database: `vendure-load-testing-${count}`,
+        database: databaseName,
         extra: {
             // connectionLimit: 150,
         },
     };
 }
-export function getPostgresConnectionOptions(count: number) {
+export function getPostgresConnectionOptions(databaseName: string) {
     return {
         type: 'postgres' as const,
         host: '127.0.0.1',
         port: 5432,
         username: 'admin',
         password: 'secret',
-        database: `vendure-load-testing-${count}`,
+        database: databaseName,
     };
 }
 
-export function getLoadTestConfig(tokenMethod: 'cookie' | 'bearer'): Required<VendureConfig> {
-    const count = getProductCount();
+export function getLoadTestConfig(
+    tokenMethod: 'cookie' | 'bearer',
+    databaseName: string,
+    db?: 'postgres' | 'mysql',
+): Required<VendureConfig> {
+    const connectionOptions =
+        process.env.DB === 'postgres' || db === 'postgres'
+            ? getPostgresConnectionOptions(databaseName)
+            : getMysqlConnectionOptions(databaseName);
     return mergeConfig(defaultConfig, {
         paymentOptions: {
-            paymentMethodHandlers: [examplePaymentHandler],
+            paymentMethodHandlers: [dummyPaymentHandler],
         },
         orderOptions: {
             orderItemsLimit: 99999,
         },
         logger: new DefaultLogger({ level: LogLevel.Info }),
-        dbConnectionOptions: getMysqlConnectionOptions(count),
+        dbConnectionOptions: {
+            ...connectionOptions,
+            synchronize: true,
+        },
         authOptions: {
             tokenMethod,
             requireVerification: false,
@@ -56,17 +66,16 @@ export function getLoadTestConfig(tokenMethod: 'cookie' | 'bearer'): Required<Ve
         importExportOptions: {
             importAssetsDir: path.join(__dirname, './data-sources'),
         },
-        workerOptions: {
-            runInMainProcess: true,
-        },
         customFields: {},
         plugins: [
             AssetServerPlugin.init({
                 assetUploadDir: path.join(__dirname, 'static/assets'),
                 route: 'assets',
-                port: 5002,
             }),
-            DefaultSearchPlugin,
+            DefaultSearchPlugin.init({ bufferUpdates: false, indexStockStatus: false }),
+            DefaultJobQueuePlugin.init({
+                pollInterval: 1000,
+            }),
         ],
     });
 }
@@ -79,7 +88,7 @@ export function getProductCsvFilePath() {
 export function getProductCount() {
     const count = +process.argv[2];
     if (!count) {
-        console.error(`Please specify the number of products to generate`);
+        console.error('Please specify the number of products to generate');
         process.exit(1);
     }
     return count;

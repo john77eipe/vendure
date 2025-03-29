@@ -1,4 +1,4 @@
-/* tslint:disable:no-console */
+/* eslint-disable no-console */
 import chalk from 'chalk';
 import { execSync } from 'child_process';
 import { createHash } from 'crypto';
@@ -6,7 +6,16 @@ import * as fs from 'fs-extra';
 import * as path from 'path';
 
 import { STATIC_ASSETS_OUTPUT_DIR } from './constants';
-import { AdminUiExtension, Extension, StaticAssetDefinition } from './types';
+import {
+    AdminUiExtension,
+    AdminUiExtensionWithId,
+    Extension,
+    GlobalStylesExtension,
+    SassVariableOverridesExtension,
+    StaticAssetDefinition,
+    StaticAssetExtension,
+    TranslationExtension,
+} from './types';
 
 export const logger = {
     log: (message: string) => console.log(chalk.green(message)),
@@ -14,14 +23,14 @@ export const logger = {
 };
 
 /**
- * Checks for the global yarn binary and returns true if found.
+ * Checks for the global yarn binary to determine whether to use yarn or npm.
  */
-export function shouldUseYarn(): boolean {
+export function determinePackageManager(): 'yarn' | 'npm' {
     try {
         execSync('yarnpkg --version', { stdio: 'ignore' });
-        return true;
-    } catch (e) {
-        return false;
+        return 'yarn';
+    } catch (e: any) {
+        return 'npm';
     }
 }
 
@@ -48,9 +57,8 @@ export function copyUiDevkit(outputPath: string) {
  */
 export async function copyStaticAsset(outputPath: string, staticAssetDef: StaticAssetDefinition) {
     const staticAssetPath = getStaticAssetPath(staticAssetDef);
-    let assetOutputPath: string;
     const assetBasename = path.basename(staticAssetPath);
-    assetOutputPath = path.join(outputPath, STATIC_ASSETS_OUTPUT_DIR, assetBasename);
+    const assetOutputPath = path.join(outputPath, STATIC_ASSETS_OUTPUT_DIR, assetBasename);
     fs.copySync(staticAssetPath, assetOutputPath);
     if (typeof staticAssetDef !== 'string') {
         // The asset is being renamed
@@ -60,7 +68,7 @@ export async function copyStaticAsset(outputPath: string, staticAssetDef: Static
             // EPERM error in Windows.
             await fs.copy(assetOutputPath, newName);
             await fs.remove(assetOutputPath);
-        } catch (e) {
+        } catch (e: any) {
             logger.log(e);
         }
     }
@@ -71,7 +79,7 @@ export async function copyStaticAsset(outputPath: string, staticAssetDef: Static
  * If not defined by the user, a deterministic ID is generated
  * from a hash of the extension config.
  */
-export function normalizeExtensions(extensions?: AdminUiExtension[]): Array<Required<AdminUiExtension>> {
+export function normalizeExtensions(extensions?: AdminUiExtension[]): AdminUiExtensionWithId[] {
     return (extensions || []).map(e => {
         let id = e.id;
         if (!id) {
@@ -80,10 +88,32 @@ export function normalizeExtensions(extensions?: AdminUiExtension[]): Array<Requ
             id = hash.digest('hex');
         }
 
-        return { staticAssets: [], translations: {}, ...e, id };
+        return {
+            staticAssets: [],
+            translations: {},
+            globalStyles: [],
+            ...e,
+            id,
+        };
     });
 }
 
 export function isAdminUiExtension(input: Extension): input is AdminUiExtension {
     return input.hasOwnProperty('extensionPath');
+}
+
+export function isTranslationExtension(input: Extension): input is TranslationExtension {
+    return input.hasOwnProperty('translations');
+}
+
+export function isStaticAssetExtension(input: Extension): input is StaticAssetExtension {
+    return input.hasOwnProperty('staticAssets');
+}
+
+export function isGlobalStylesExtension(input: Extension): input is GlobalStylesExtension {
+    return input.hasOwnProperty('globalStyles');
+}
+
+export function isSassVariableOverridesExtension(input: Extension): input is SassVariableOverridesExtension {
+    return input.hasOwnProperty('sassVariableOverrides');
 }

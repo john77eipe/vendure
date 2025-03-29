@@ -1,28 +1,27 @@
-import { DNSHealthIndicator, TerminusModule } from '@nestjs/terminus';
+import {
+    Inject,
+    MiddlewareConsumer,
+    NestModule,
+    OnApplicationBootstrap,
+    OnApplicationShutdown,
+} from '@nestjs/common';
+import { ModuleRef } from '@nestjs/core';
 import { Type } from '@vendure/common/lib/shared-types';
 import {
-    AssetStorageStrategy,
-    createProxyHandler,
-    HealthCheckRegistryService,
+    Injector,
     Logger,
-    OnVendureBootstrap,
-    OnVendureClose,
     PluginCommonModule,
-    RuntimeVendureConfig,
+    ProcessContext,
+    registerPluginStartupMessage,
     VendurePlugin,
 } from '@vendure/core';
-import { createHash } from 'crypto';
-import express, { NextFunction, Request, Response } from 'express';
-import { fromBuffer } from 'file-type';
-import fs from 'fs-extra';
-import { Server } from 'http';
-import path from 'path';
 
-import { loggerCtx } from './constants';
-import { defaultAssetStorageStrategyFactory } from './default-asset-storage-strategy-factory';
-import { HashedAssetNamingStrategy } from './hashed-asset-naming-strategy';
-import { SharpAssetPreviewStrategy } from './sharp-asset-preview-strategy';
-import { transformImage } from './transform-image';
+import { AssetServer } from './asset-server';
+import { defaultAssetStorageStrategyFactory } from './config/default-asset-storage-strategy-factory';
+import { HashedAssetNamingStrategy } from './config/hashed-asset-naming-strategy';
+import { ImageTransformStrategy } from './config/image-transform-strategy';
+import { SharpAssetPreviewStrategy } from './config/sharp-asset-preview-strategy';
+import { ASSET_SERVER_PLUGIN_INIT_OPTIONS, loggerCtx } from './constants';
 import { AssetServerOptions, ImageTransformPreset } from './types';
 
 /**
@@ -49,13 +48,12 @@ import { AssetServerOptions, ImageTransformPreset } from './types';
  *     AssetServerPlugin.init({
  *       route: 'assets',
  *       assetUploadDir: path.join(__dirname, 'assets'),
- *       port: 4000,
  *     }),
  *   ],
  * };
  * ```
  *
- * The full configuration is documented at [AssetServerOptions]({{< relref "asset-server-options" >}})
+ * The full configuration is documented at [AssetServerOptions](/reference/core-plugins/asset-server-plugin/asset-server-options)
  *
  * ## Image transformation
  *
@@ -67,7 +65,7 @@ import { AssetServerOptions, ImageTransformPreset } from './types';
  *
  * ### Preview mode
  *
- * The `mode` parameter can be either `crop` or `resize`. See the [ImageTransformMode]({{< relref "image-transform-mode" >}}) docs for details.
+ * The `mode` parameter can be either `crop` or `resize`. See the [ImageTransformMode](/reference/core-plugins/asset-server-plugin/image-transform-mode) docs for details.
  *
  * ### Focal point
  *
@@ -83,15 +81,41 @@ import { AssetServerOptions, ImageTransformPreset } from './types';
  *
  * `http://localhost:3000/assets/landscape.jpg?w=150&h=150&mode=crop&fpx=0.2&fpy=0.7`
  *
+ * ### Format
+ *
+ * Since v1.7.0, the image format can be specified by adding the `format` query parameter:
+ *
+ * `http://localhost:3000/assets/some-asset.jpg?format=webp`
+ *
+ * This means that, no matter the format of your original asset files, you can use more modern formats in your storefront if the browser
+ * supports them. Supported values for `format` are:
+ *
+ * * `jpeg` or `jpg`
+ * * `png`
+ * * `webp`
+ * * `avif`
+ *
+ * The `format` parameter can also be combined with presets (see below).
+ *
+ * ### Quality
+ *
+ * Since v2.2.0, the image quality can be specified by adding the `q` query parameter:
+ *
+ * `http://localhost:3000/assets/some-asset.jpg?q=75`
+ *
+ * This applies to the `jpg`, `webp` and `avif` formats. The default quality value for `jpg` and `webp` is 80, and for `avif` is 50.
+ *
+ * The `q` parameter can also be combined with presets (see below).
+ *
  * ### Transform presets
  *
  * Presets can be defined which allow a single preset name to be used instead of specifying the width, height and mode. Presets are
- * configured via the AssetServerOptions [presets property]({{< relref "asset-server-options" >}}#presets).
+ * configured via the AssetServerOptions [presets property](/reference/core-plugins/asset-server-plugin/asset-server-options/#presets).
  *
  * For example, defining the following preset:
  *
  * ```ts
- * new AssetServerPlugin({
+ * AssetServerPlugin.init({
  *   // ...
  *   presets: [
  *     { name: 'my-preset', width: 85, height: 85, mode: 'crop' },
@@ -121,29 +145,64 @@ import { AssetServerOptions, ImageTransformPreset } from './types';
  * By default, the AssetServerPlugin will cache every transformed image, so that the transformation only needs to be performed a single time for
  * a given configuration. Caching can be disabled per-request by setting the `?cache=false` query parameter.
  *
- * @docsCategory AssetServerPlugin
+ * ### Limiting transformations
+ *
+ * By default, the AssetServerPlugin will allow any transformation to be performed on an image. However, it is possible to restrict the transformations
+ * which can be performed by using an {@link ImageTransformStrategy}. This can be used to limit the transformations to a known set of presets, for example.
+ *
+ * This is advisable in order to prevent abuse of the image transformation feature, as it can be computationally expensive.
+ *
+ * Since v3.1.0 we ship with a {@link PresetOnlyStrategy} which allows only transformations using a known set of presets.
+ *
+ * @example
+ * ```ts
+ * import { AssetServerPlugin, PresetOnlyStrategy } from '\@vendure/core';
+ *
+ * // ...
+ *
+ * AssetServerPlugin.init({
+ *   //...
+ *   imageTransformStrategy: new PresetOnlyStrategy({
+ *     defaultPreset: 'thumbnail',
+ *     permittedQuality: [0, 50, 75, 85, 95],
+ *     permittedFormats: ['jpg', 'webp', 'avif'],
+ *     allowFocalPoint: false,
+ *   }),
+ * });
+ * ```
+ *
+ * @docsCategory core plugins/AssetServerPlugin
  */
 @VendurePlugin({
-    imports: [PluginCommonModule, TerminusModule],
-    configuration: config => AssetServerPlugin.configure(config),
+    imports: [PluginCommonModule],
+    configuration: async config => {
+        const options = AssetServerPlugin.options;
+        const storageStrategyFactory = options.storageStrategyFactory || defaultAssetStorageStrategyFactory;
+        config.assetOptions.assetPreviewStrategy =
+            options.previewStrategy ??
+            new SharpAssetPreviewStrategy({
+                maxWidth: options.previewMaxWidth,
+                maxHeight: options.previewMaxHeight,
+            });
+        config.assetOptions.assetStorageStrategy = await storageStrategyFactory(options);
+        config.assetOptions.assetNamingStrategy = options.namingStrategy || new HashedAssetNamingStrategy();
+        return config;
+    },
+    providers: [
+        { provide: ASSET_SERVER_PLUGIN_INIT_OPTIONS, useFactory: () => AssetServerPlugin.options },
+        AssetServer,
+    ],
+    compatibility: '^3.0.0',
 })
-export class AssetServerPlugin implements OnVendureBootstrap, OnVendureClose {
-    private server: Server;
-    private static assetStorage: AssetStorageStrategy;
-    private readonly cacheDir = 'cache';
-    private presets: ImageTransformPreset[] = [
+export class AssetServerPlugin implements NestModule, OnApplicationBootstrap, OnApplicationShutdown {
+    private static options: AssetServerOptions;
+    private readonly defaultPresets: ImageTransformPreset[] = [
         { name: 'tiny', width: 50, height: 50, mode: 'crop' },
         { name: 'thumb', width: 150, height: 150, mode: 'crop' },
         { name: 'small', width: 300, height: 300, mode: 'resize' },
         { name: 'medium', width: 500, height: 500, mode: 'resize' },
         { name: 'large', width: 800, height: 800, mode: 'resize' },
     ];
-    private static options: AssetServerOptions;
-
-    constructor(
-        private healthCheckRegistryService: HealthCheckRegistryService,
-        private dns: DNSHealthIndicator,
-    ) {}
 
     /**
      * @description
@@ -154,186 +213,71 @@ export class AssetServerPlugin implements OnVendureBootstrap, OnVendureClose {
         return this;
     }
 
+    constructor(
+        @Inject(ASSET_SERVER_PLUGIN_INIT_OPTIONS) private options: AssetServerOptions,
+        private processContext: ProcessContext,
+        private moduleRef: ModuleRef,
+        private assetServer: AssetServer,
+    ) {}
+
     /** @internal */
-    static async configure(config: RuntimeVendureConfig) {
-        const storageStrategyFactory =
-            this.options.storageStrategyFactory || defaultAssetStorageStrategyFactory;
-        this.assetStorage = await storageStrategyFactory(this.options);
-        config.assetOptions.assetPreviewStrategy = new SharpAssetPreviewStrategy({
-            maxWidth: this.options.previewMaxWidth || 1600,
-            maxHeight: this.options.previewMaxHeight || 1600,
-        });
-        config.assetOptions.assetStorageStrategy = this.assetStorage;
-        config.assetOptions.assetNamingStrategy =
-            this.options.namingStrategy || new HashedAssetNamingStrategy();
-        config.apiOptions.middleware.push({
-            handler: createProxyHandler({ ...this.options, label: 'Asset Server' }),
-            route: this.options.route,
-        });
-        return config;
+    async onApplicationBootstrap() {
+        if (this.processContext.isWorker) {
+            return;
+        }
+        if (this.options.imageTransformStrategy != null) {
+            const injector = new Injector(this.moduleRef);
+            for (const strategy of this.getImageTransformStrategyArray()) {
+                if (typeof strategy.init === 'function') {
+                    await strategy.init(injector);
+                }
+            }
+        }
     }
 
     /** @internal */
-    onVendureBootstrap(): void | Promise<void> {
-        if (AssetServerPlugin.options.presets) {
-            for (const preset of AssetServerPlugin.options.presets) {
-                const existingIndex = this.presets.findIndex(p => p.name === preset.name);
+    async onApplicationShutdown() {
+        if (this.processContext.isWorker) {
+            return;
+        }
+        if (this.options.imageTransformStrategy != null) {
+            for (const strategy of this.getImageTransformStrategyArray()) {
+                if (typeof strategy.destroy === 'function') {
+                    await strategy.destroy();
+                }
+            }
+        }
+    }
+
+    configure(consumer: MiddlewareConsumer) {
+        if (this.processContext.isWorker) {
+            return;
+        }
+        const presets = [...this.defaultPresets];
+        if (this.options.presets) {
+            for (const preset of this.options.presets) {
+                const existingIndex = presets.findIndex(p => p.name === preset.name);
                 if (-1 < existingIndex) {
-                    this.presets.splice(existingIndex, 1, preset);
+                    presets.splice(existingIndex, 1, preset);
                 } else {
-                    this.presets.push(preset);
+                    presets.push(preset);
                 }
             }
         }
-
-        const cachePath = path.join(AssetServerPlugin.options.assetUploadDir, this.cacheDir);
-        fs.ensureDirSync(cachePath);
-        this.createAssetServer();
-        const { hostname, port } = AssetServerPlugin.options;
-    }
-
-    /** @internal */
-    onVendureClose(): Promise<void> {
-        return new Promise(resolve => {
-            this.server.close(() => resolve());
+        Logger.info('Creating asset server middleware', loggerCtx);
+        const assetServerRouter = this.assetServer.createAssetServer({
+            presets,
+            imageTransformStrategies: this.getImageTransformStrategyArray(),
         });
+        consumer.apply(assetServerRouter).forRoutes(this.options.route);
+        registerPluginStartupMessage('Asset server', this.options.route);
     }
 
-    /**
-     * Creates the image server instance
-     */
-    private createAssetServer() {
-        const assetServer = express();
-        assetServer.get('/health', (req, res) => {
-            res.send('ok');
-        });
-        assetServer.use(this.sendAsset(), this.generateTransformedImage());
-
-        this.server = assetServer.listen(AssetServerPlugin.options.port, () => {
-            const addressInfo = this.server.address();
-            if (addressInfo && typeof addressInfo !== 'string') {
-                const { address, port } = addressInfo;
-                Logger.info(`Asset server listening on "http://localhost:${port}"`, loggerCtx);
-                this.healthCheckRegistryService.registerIndicatorFunction(() =>
-                    this.dns.pingCheck('asset-server', `http://localhost:${port}/health`),
-                );
-            }
-        });
-    }
-
-    /**
-     * Reads the file requested and send the response to the browser.
-     */
-    private sendAsset() {
-        return async (req: Request, res: Response, next: NextFunction) => {
-            const key = this.getFileNameFromRequest(req);
-            try {
-                const file = await AssetServerPlugin.assetStorage.readFileToBuffer(key);
-                let mimeType = this.getMimeType(key);
-                if (!mimeType) {
-                    mimeType = (await fromBuffer(file))?.mime || 'application/octet-stream';
-                }
-                res.contentType(mimeType);
-                res.send(file);
-            } catch (e) {
-                const err = new Error('File not found');
-                (err as any).status = 404;
-                return next(err);
-            }
-        };
-    }
-
-    /**
-     * If an exception was thrown by the first handler, then it may be because a transformed image
-     * is being requested which does not yet exist. In this case, this handler will generate the
-     * transformed image, save it to cache, and serve the result as a response.
-     */
-    private generateTransformedImage() {
-        return async (err: any, req: Request, res: Response, next: NextFunction) => {
-            if (err && (err.status === 404 || err.statusCode === 404)) {
-                if (req.query) {
-                    Logger.debug(`Pre-cached Asset not found: ${req.path}`, loggerCtx);
-                    let file: Buffer;
-                    try {
-                        file = await AssetServerPlugin.assetStorage.readFileToBuffer(req.path);
-                    } catch (err) {
-                        res.status(404).send('Resource not found');
-                        return;
-                    }
-                    const image = await transformImage(file, req.query as any, this.presets || []);
-                    try {
-                        const imageBuffer = await image.toBuffer();
-                        if (!req.query.cache || req.query.cache === 'true') {
-                            const cachedFileName = this.getFileNameFromRequest(req);
-                            await AssetServerPlugin.assetStorage.writeFileFromBuffer(
-                                cachedFileName,
-                                imageBuffer,
-                            );
-                            Logger.debug(`Saved cached asset: ${cachedFileName}`, loggerCtx);
-                        }
-                        res.set('Content-Type', `image/${(await image.metadata()).format}`);
-                        res.send(imageBuffer);
-                    } catch (e) {
-                        Logger.error(e, 'AssetServerPlugin', e.stack);
-                        res.status(500).send(e.message);
-                    }
-                }
-            }
-            next();
-        };
-    }
-
-    private getFileNameFromRequest(req: Request): string {
-        const { w, h, mode, preset, fpx, fpy } = req.query;
-        const focalPoint = fpx && fpy ? `_fpx${fpx}_fpy${fpy}` : '';
-        let imageParamHash: string | null = null;
-        if (w || h) {
-            const width = w || '';
-            const height = h || '';
-            imageParamHash = this.md5(`_transform_w${width}_h${height}_m${mode}${focalPoint}`);
-        } else if (preset) {
-            if (this.presets && !!this.presets.find(p => p.name === preset)) {
-                imageParamHash = this.md5(`_transform_pre_${preset}${focalPoint}`);
-            }
-        }
-
-        if (imageParamHash) {
-            return path.join(this.cacheDir, this.addSuffix(req.path, imageParamHash));
-        } else {
-            return req.path;
-        }
-    }
-
-    private md5(input: string): string {
-        return createHash('md5').update(input).digest('hex');
-    }
-
-    private addSuffix(fileName: string, suffix: string): string {
-        const ext = path.extname(fileName);
-        const baseName = path.basename(fileName, ext);
-        const dirName = path.dirname(fileName);
-        return path.join(dirName, `${baseName}${suffix}${ext}`);
-    }
-
-    /**
-     * Attempt to get the mime type from the file name.
-     */
-    private getMimeType(fileName: string): string | undefined {
-        const ext = path.extname(fileName);
-        switch (ext) {
-            case '.jpg':
-            case '.jpeg':
-                return 'image/jpeg';
-            case '.png':
-                return 'image/png';
-            case '.gif':
-                return 'image/gif';
-            case '.svg':
-                return 'image/svg+xml';
-            case '.tiff':
-                return 'image/tiff';
-            case '.webp':
-                return 'image/webp';
-        }
+    private getImageTransformStrategyArray(): ImageTransformStrategy[] {
+        return this.options.imageTransformStrategy
+            ? Array.isArray(this.options.imageTransformStrategy)
+                ? this.options.imageTransformStrategy
+                : [this.options.imageTransformStrategy]
+            : [];
     }
 }

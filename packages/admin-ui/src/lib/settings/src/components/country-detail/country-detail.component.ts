@@ -1,52 +1,63 @@
-import { ChangeDetectorRef, Component, OnDestroy, OnInit } from '@angular/core';
-import { FormBuilder, FormGroup, Validators } from '@angular/forms';
-import { ActivatedRoute, Router } from '@angular/router';
+import { ChangeDetectionStrategy, ChangeDetectorRef, Component, OnDestroy, OnInit } from '@angular/core';
+import { FormBuilder, Validators } from '@angular/forms';
 import { marker as _ } from '@biesbjerg/ngx-translate-extract-marker';
 import {
-    BaseDetailComponent,
-    Country,
-    CreateCountryInput,
+    COUNTRY_FRAGMENT,
+    CountryFragment,
     createUpdatedTranslatable,
     DataService,
+    findTranslation,
+    GetCountryDetailDocument,
+    getCustomFieldsDefaults,
     LanguageCode,
     NotificationService,
-    ServerConfigService,
+    Permission,
+    TypedBaseDetailComponent,
     UpdateCountryInput,
 } from '@vendure/admin-ui/core';
-import { combineLatest, Observable } from 'rxjs';
+import { gql } from 'apollo-angular';
+import { combineLatest } from 'rxjs';
 import { mergeMap, take } from 'rxjs/operators';
+
+export const GET_COUNTRY_DETAIL = gql`
+    query GetCountryDetail($id: ID!) {
+        country(id: $id) {
+            ...Country
+        }
+    }
+    ${COUNTRY_FRAGMENT}
+`;
 
 @Component({
     selector: 'vdr-country-detail',
     templateUrl: './country-detail.component.html',
     styleUrls: ['./country-detail.component.scss'],
+    changeDetection: ChangeDetectionStrategy.OnPush,
 })
 export class CountryDetailComponent
-    extends BaseDetailComponent<Country.Fragment>
-    implements OnInit, OnDestroy {
-    country$: Observable<Country.Fragment>;
-    detailForm: FormGroup;
+    extends TypedBaseDetailComponent<typeof GetCountryDetailDocument, 'country'>
+    implements OnInit, OnDestroy
+{
+    customFields = this.getCustomFieldConfig('Region');
+    detailForm = this.formBuilder.group({
+        code: ['', Validators.required],
+        name: ['', Validators.required],
+        enabled: [true],
+        customFields: this.formBuilder.group(getCustomFieldsDefaults(this.customFields)),
+    });
+    readonly updatePermission = [Permission.UpdateSettings, Permission.UpdateCountry];
 
     constructor(
-        router: Router,
-        route: ActivatedRoute,
-        serverConfigService: ServerConfigService,
         private changeDetector: ChangeDetectorRef,
         protected dataService: DataService,
         private formBuilder: FormBuilder,
         private notificationService: NotificationService,
     ) {
-        super(route, router, serverConfigService, dataService);
-        this.detailForm = this.formBuilder.group({
-            code: ['', Validators.required],
-            name: ['', Validators.required],
-            enabled: [true],
-        });
+        super();
     }
 
     ngOnInit() {
         this.init();
-        this.country$ = this.entity$;
     }
 
     ngOnDestroy(): void {
@@ -57,42 +68,45 @@ export class CountryDetailComponent
         if (!this.detailForm.dirty) {
             return;
         }
-        combineLatest(this.country$, this.languageCode$)
-            .pipe(
-                take(1),
-                mergeMap(([country, languageCode]) => {
-                    const formValue = this.detailForm.value;
-                    const input: CreateCountryInput = createUpdatedTranslatable({
-                        translatable: country,
-                        updatedFields: formValue,
-                        languageCode,
-                        defaultTranslation: {
-                            name: formValue.name,
-                            languageCode,
-                        },
-                    });
-                    return this.dataService.settings.createCountry(input);
-                }),
-            )
-            .subscribe(
-                data => {
-                    this.notificationService.success(_('common.notify-create-success'), {
-                        entity: 'Country',
-                    });
-                    this.detailForm.markAsPristine();
-                    this.changeDetector.markForCheck();
-                    this.router.navigate(['../', data.createCountry.id], { relativeTo: this.route });
-                },
-                err => {
-                    this.notificationService.error(_('common.notify-create-error'), {
-                        entity: 'Country',
-                    });
-                },
-            );
+
+        const formValue = this.detailForm.value;
+        const input = createUpdatedTranslatable({
+            translatable: {
+                id: '',
+                createdAt: '',
+                updatedAt: '',
+                code: '',
+                name: '',
+                enabled: false,
+                translations: [],
+            } as CountryFragment,
+            updatedFields: formValue,
+            languageCode: this.languageCode,
+            customFieldConfig: this.customFields,
+            defaultTranslation: {
+                name: formValue.name ?? '',
+                languageCode: this.languageCode,
+            },
+        });
+        this.dataService.settings.createCountry(input).subscribe(
+            data => {
+                this.notificationService.success(_('common.notify-create-success'), {
+                    entity: 'Country',
+                });
+                this.detailForm.markAsPristine();
+                this.changeDetector.markForCheck();
+                this.router.navigate(['../', data.createCountry.id], { relativeTo: this.route });
+            },
+            err => {
+                this.notificationService.error(_('common.notify-create-error'), {
+                    entity: 'Country',
+                });
+            },
+        );
     }
 
     save() {
-        combineLatest(this.country$, this.languageCode$)
+        combineLatest(this.entity$, this.languageCode$)
             .pipe(
                 take(1),
                 mergeMap(([country, languageCode]) => {
@@ -100,9 +114,10 @@ export class CountryDetailComponent
                     const input: UpdateCountryInput = createUpdatedTranslatable({
                         translatable: country,
                         updatedFields: formValue,
+                        customFieldConfig: this.customFields,
                         languageCode,
                         defaultTranslation: {
-                            name: formValue.name,
+                            name: formValue.name ?? '',
                             languageCode,
                         },
                     });
@@ -125,13 +140,22 @@ export class CountryDetailComponent
             );
     }
 
-    protected setFormValues(country: Country, languageCode: LanguageCode): void {
-        const currentTranslation = country.translations.find(t => t.languageCode === languageCode);
+    protected setFormValues(country: CountryFragment, languageCode: LanguageCode): void {
+        const currentTranslation = findTranslation(country, languageCode);
 
         this.detailForm.patchValue({
             code: country.code,
             name: currentTranslation ? currentTranslation.name : '',
             enabled: country.enabled,
         });
+
+        if (this.customFields.length) {
+            this.setCustomFieldFormValues(
+                this.customFields,
+                this.detailForm.get(['customFields']),
+                country,
+                currentTranslation,
+            );
+        }
     }
 }

@@ -1,13 +1,14 @@
-import { Module } from '@nestjs/common';
+import { MiddlewareConsumer, Module, NestModule } from '@nestjs/common';
 import { APP_FILTER, APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
 import path from 'path';
 
+import { ConfigService } from '../config/config.service';
+import { ConnectionModule } from '../connection/connection.module';
 import { DataImportModule } from '../data-import/data-import.module';
 import { I18nModule } from '../i18n/i18n.module';
 import { ServiceModule } from '../service/service.module';
 
 import { AdminApiModule, ApiSharedModule, ShopApiModule } from './api-internal-modules';
-import { RequestContextService } from './common/request-context.service';
 import { configureGraphQLModule } from './config/configure-graphql-module';
 import { AuthGuard } from './middleware/auth-guard';
 import { ExceptionLoggerFilter } from './middleware/exception-logger.filter';
@@ -22,7 +23,8 @@ import { ValidateCustomFieldsInterceptor } from './middleware/validate-custom-fi
  */
 @Module({
     imports: [
-        ServiceModule.forRoot(),
+        ServiceModule,
+        ConnectionModule.forRoot(),
         DataImportModule,
         I18nModule,
         ApiSharedModule,
@@ -33,24 +35,21 @@ import { ValidateCustomFieldsInterceptor } from './middleware/validate-custom-fi
             apiPath: configService.apiOptions.shopApiPath,
             playground: configService.apiOptions.shopApiPlayground,
             debug: configService.apiOptions.shopApiDebug,
-            typePaths: ['type', 'shop-api', 'common'].map(p =>
-                path.join(__dirname, 'schema', p, '*.graphql'),
-            ),
+            typePaths: ['shop-api', 'common'].map(p => path.join(__dirname, 'schema', p, '*.graphql')),
             resolverModule: ShopApiModule,
+            validationRules: configService.apiOptions.shopApiValidationRules,
         })),
         configureGraphQLModule(configService => ({
             apiType: 'admin',
             apiPath: configService.apiOptions.adminApiPath,
             playground: configService.apiOptions.adminApiPlayground,
             debug: configService.apiOptions.adminApiDebug,
-            typePaths: ['type', 'admin-api', 'common'].map(p =>
-                path.join(__dirname, 'schema', p, '*.graphql'),
-            ),
+            typePaths: ['admin-api', 'common'].map(p => path.join(__dirname, 'schema', p, '*.graphql')),
             resolverModule: AdminApiModule,
+            validationRules: configService.apiOptions.adminApiValidationRules,
         })),
     ],
     providers: [
-        RequestContextService,
         {
             provide: APP_GUARD,
             useClass: AuthGuard,
@@ -73,4 +72,15 @@ import { ValidateCustomFieldsInterceptor } from './middleware/validate-custom-fi
         },
     ],
 })
-export class ApiModule {}
+export class ApiModule implements NestModule {
+    constructor(private configService: ConfigService) {}
+    async configure(consumer: MiddlewareConsumer) {
+        const { adminApiPath, shopApiPath } = this.configService.apiOptions;
+        const { uploadMaxFileSize } = this.configService.assetOptions;
+        // @ts-ignore
+        const { default: graphqlUploadExpress } = await import('graphql-upload/graphqlUploadExpress.mjs');
+        consumer
+            .apply(graphqlUploadExpress({ maxFileSize: uploadMaxFileSize }))
+            .forRoutes(adminApiPath, shopApiPath);
+    }
+}

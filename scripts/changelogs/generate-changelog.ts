@@ -2,8 +2,13 @@ import fs from 'fs-extra';
 import path from 'path';
 
 import { addStream } from './add-stream';
-// tslint:disable-next-line:no-var-requires
+// eslint-disable-next-line @typescript-eslint/no-var-requires
 const conventionalChangelogCore = require('conventional-changelog-core');
+
+let changelogFileName = 'CHANGELOG.md';
+if (process.argv.includes('--next') || process.env.npm_config_argv?.includes('publish-prerelease')) {
+    changelogFileName = 'CHANGELOG_NEXT.md';
+}
 
 /**
  * The types of commit which will be included in the changelog.
@@ -18,14 +23,20 @@ const VALID_SCOPES: string[] = [
     'admin-ui',
     'asset-server',
     'asset-server-plugin',
+    'cli',
     'common',
     'core',
     'create',
     'elasticsearch-plugin',
     'email-plugin',
     'email',
+    'job-queue-plugin',
+    'payments-plugin',
     'testing',
     'ui-devkit',
+    'harden-plugin',
+    'stellate-plugin',
+    'sentry-plugin',
 ];
 
 const mainTemplate = fs.readFileSync(path.join(__dirname, 'template.hbs'), 'utf-8');
@@ -37,7 +48,7 @@ generateChangelogForPackage();
  * Generates changelog entries based on the conventional commits data.
  */
 function generateChangelogForPackage() {
-    const changelogPath = path.join(__dirname, '../../CHANGELOG.md');
+    const changelogPath = path.join(__dirname, '../../', changelogFileName);
     const inStream = fs.createReadStream(changelogPath, { flags: 'a+' });
     const tempFile = path.join(__dirname, `__temp_changelog__`);
     conventionalChangelogCore(

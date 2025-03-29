@@ -1,41 +1,73 @@
 import { NodeOptions } from '@elastic/elasticsearch';
+import { OnApplicationBootstrap } from '@nestjs/common';
 import {
     AssetEvent,
+    BUFFER_SEARCH_INDEX_UPDATES,
     CollectionModificationEvent,
     EventBus,
     HealthCheckRegistryService,
     ID,
     idsAreEqual,
     Logger,
-    OnVendureBootstrap,
     PluginCommonModule,
     ProductChannelEvent,
     ProductEvent,
+    ProductVariantChannelEvent,
     ProductVariantEvent,
+    SearchJobBufferService,
+    StockMovementEvent,
     TaxRateModificationEvent,
     Type,
     VendurePlugin,
 } from '@vendure/core';
 import { buffer, debounceTime, delay, filter, map } from 'rxjs/operators';
 
+import { generateSchemaExtensions } from './api/api-extensions';
+import { CustomMappingsResolver } from './api/custom-mappings.resolver';
+import { CustomScriptFieldsResolver } from './api/custom-script-fields.resolver';
+import {
+    AdminElasticSearchResolver,
+    EntityElasticSearchResolver,
+    ShopElasticSearchResolver,
+} from './api/elasticsearch-resolver';
 import { ELASTIC_SEARCH_OPTIONS, loggerCtx } from './constants';
-import { CustomMappingsResolver } from './custom-mappings.resolver';
-import { ElasticsearchIndexService } from './elasticsearch-index.service';
-import { AdminElasticSearchResolver, ShopElasticSearchResolver } from './elasticsearch-resolver';
 import { ElasticsearchHealthIndicator } from './elasticsearch.health';
 import { ElasticsearchService } from './elasticsearch.service';
-import { generateSchemaExtensions } from './graphql-schema-extensions';
-import { ElasticsearchIndexerController } from './indexer.controller';
+import { ElasticsearchIndexService } from './indexing/elasticsearch-index.service';
+import { ElasticsearchIndexerController } from './indexing/indexer.controller';
 import { ElasticsearchOptions, ElasticsearchRuntimeOptions, mergeWithDefaults } from './options';
+
+function getCustomResolvers(options: ElasticsearchRuntimeOptions) {
+    const requiresUnionResolver =
+        0 < Object.keys(options.customProductMappings || {}).length &&
+        0 < Object.keys(options.customProductVariantMappings || {}).length;
+    const requiresUnionScriptResolver =
+        0 <
+            Object.values(options.searchConfig.scriptFields || {}).filter(
+                field => field.context !== 'product',
+            ).length &&
+        0 <
+            Object.values(options.searchConfig.scriptFields || {}).filter(
+                field => field.context !== 'variant',
+            ).length;
+    return [
+        ...(requiresUnionResolver ? [CustomMappingsResolver] : []),
+        ...(requiresUnionScriptResolver ? [CustomScriptFieldsResolver] : []),
+    ];
+}
 
 /**
  * @description
  * This plugin allows your product search to be powered by [Elasticsearch](https://github.com/elastic/elasticsearch) - a powerful Open Source search
- * engine. This is a drop-in replacement for the DefaultSearchPlugin.
+ * engine. This is a drop-in replacement for the DefaultSearchPlugin which exposes many powerful configuration options enabling your storefront
+ * to support a wide range of use-cases such as indexing of custom properties, fine control over search index configuration, and to leverage
+ * advanced Elasticsearch features like spacial search.
  *
  * ## Installation
  *
- * **Requires Elasticsearch v7.0 or higher.**
+ * **Requires Elasticsearch v7.0 < required Elasticsearch version < 7.10 **
+ * Elasticsearch version 7.10.2 will throw error due to incompatibility with elasticsearch-js client.
+ * [Check here for more info](https://github.com/elastic/elasticsearch-js/issues/1519).
  *
  * `yarn add \@elastic/elasticsearch \@vendure/elasticsearch-plugin`
  *
@@ -65,9 +97,9 @@ import { ElasticsearchOptions, ElasticsearchRuntimeOptions, mergeWithDefaults } 
  * ## Search API Extensions
  * This plugin extends the default search query of the Shop API, allowing richer querying of your product data.
  *
- * The [SearchResponse](/docs/graphql-api/admin/object-types/#searchresponse) type is extended with information
+ * The [SearchResponse](/reference/graphql-api/shop/object-types/#searchresponse) type is extended with information
  * about price ranges in the result set:
- * ```SDL
+ * ```graphql
  * extend type SearchResponse {
  *     prices: SearchResponsePriceData!
  * }
@@ -87,6 +119,7 @@ import { ElasticsearchOptions, ElasticsearchRuntimeOptions, mergeWithDefaults } 
  * extend input SearchInput {
  *     priceRange: PriceRangeInput
  *     priceRangeWithTax: PriceRangeInput
+ *     inStock: Boolean
  * }
  *
  * input PriceRangeInput {
@@ -99,7 +132,7 @@ import { ElasticsearchOptions, ElasticsearchRuntimeOptions, mergeWithDefaults } 
  *
  * ## Example Request & Response
  *
- * ```SDL
+ * ```graphql
  * {
  *   search (input: {
  *     term: "table easel"
@@ -134,7 +167,7 @@ import { ElasticsearchOptions, ElasticsearchRuntimeOptions, mergeWithDefaults } 
  * }
  * ```
  *
- * ```JSON
+ * ```json
  *{
  *  "data": {
  *    "search": {
@@ -187,7 +220,7 @@ import { ElasticsearchOptions, ElasticsearchRuntimeOptions, mergeWithDefaults } 
  *}
  * ```
  *
- * @docsCategory ElasticsearchPlugin
+ * @docsCategory core plugins/ElasticsearchPlugin
  */
 @VendurePlugin({
     imports: [PluginCommonModule],
@@ -195,26 +228,35 @@ import { ElasticsearchOptions, ElasticsearchRuntimeOptions, mergeWithDefaults } 
         ElasticsearchIndexService,
         ElasticsearchService,
         ElasticsearchHealthIndicator,
+        ElasticsearchIndexerController,
+        SearchJobBufferService,
         { provide: ELASTIC_SEARCH_OPTIONS, useFactory: () => ElasticsearchPlugin.options },
-    ],
-    adminApiExtensions: { resolvers: [AdminElasticSearchResolver] },
-    shopApiExtensions: {
-        resolvers: () => {
-            const { options } = ElasticsearchPlugin;
-            const requiresUnionResolver =
-                0 < Object.keys(options.customProductMappings || {}).length &&
-                0 < Object.keys(options.customProductVariantMappings || {}).length;
-            return requiresUnionResolver
-                ? [ShopElasticSearchResolver, CustomMappingsResolver]
-                : [ShopElasticSearchResolver];
+        {
+            provide: BUFFER_SEARCH_INDEX_UPDATES,
+            useFactory: () => ElasticsearchPlugin.options.bufferUpdates === true,
         },
+    ],
+    adminApiExtensions: {
+        resolvers: () => [
+            AdminElasticSearchResolver,
+            EntityElasticSearchResolver,
+            ...getCustomResolvers(ElasticsearchPlugin.options),
+        ],
+        schema: () => generateSchemaExtensions(ElasticsearchPlugin.options as any),
+    },
+    shopApiExtensions: {
+        resolvers: () => [
+            ShopElasticSearchResolver,
+            EntityElasticSearchResolver,
+            ...getCustomResolvers(ElasticsearchPlugin.options),
+        ],
         // `any` cast is there due to a strange error "Property '[Symbol.iterator]' is missing in type... URLSearchParams"
         // which looks like possibly a TS/definitions bug.
         schema: () => generateSchemaExtensions(ElasticsearchPlugin.options as any),
     },
-    workers: [ElasticsearchIndexerController],
+    compatibility: '^3.0.0',
 })
-export class ElasticsearchPlugin implements OnVendureBootstrap {
+export class ElasticsearchPlugin implements OnApplicationBootstrap {
     private static options: ElasticsearchRuntimeOptions;
 
     /** @internal */
@@ -235,12 +277,11 @@ export class ElasticsearchPlugin implements OnVendureBootstrap {
     }
 
     /** @internal */
-    async onVendureBootstrap(): Promise<void> {
-        const { host, port } = ElasticsearchPlugin.options;
+    async onApplicationBootstrap(): Promise<void> {
         const nodeName = this.nodeName();
         try {
-            const pingResult = await this.elasticsearchService.checkConnection();
-        } catch (e) {
+            await this.elasticsearchService.checkConnection();
+        } catch (e: any) {
             Logger.error(`Could not connect to Elasticsearch instance at "${nodeName}"`, loggerCtx);
             Logger.error(JSON.stringify(e), loggerCtx);
             this.healthCheckRegistryService.registerIndicatorFunction(() =>
@@ -251,7 +292,6 @@ export class ElasticsearchPlugin implements OnVendureBootstrap {
         Logger.info(`Successfully connected to Elasticsearch instance at "${nodeName}"`, loggerCtx);
 
         await this.elasticsearchService.createIndicesIfNotExists();
-        this.elasticsearchIndexService.initJobQueue();
         this.healthCheckRegistryService.registerIndicatorFunction(() =>
             this.elasticsearchHealthIndicator.isHealthy(),
         );
@@ -295,6 +335,30 @@ export class ElasticsearchPlugin implements OnVendureBootstrap {
             }
         });
 
+        this.eventBus.ofType(ProductVariantChannelEvent).subscribe(event => {
+            if (event.type === 'assigned') {
+                return this.elasticsearchIndexService.assignVariantToChannel(
+                    event.ctx,
+                    event.productVariant.id,
+                    event.channelId,
+                );
+            } else {
+                return this.elasticsearchIndexService.removeVariantFromChannel(
+                    event.ctx,
+                    event.productVariant.id,
+                    event.channelId,
+                );
+            }
+        });
+
+        this.eventBus.ofType(StockMovementEvent).subscribe(event => {
+            return this.elasticsearchIndexService.updateVariants(
+                event.ctx,
+                event.stockMovements.map(m => m.productVariant),
+            );
+        });
+
+        // TODO: Remove this buffering logic because because we have dedicated buffering based on #1137
         const collectionModification$ = this.eventBus.ofType(CollectionModificationEvent);
         const closingNotifier$ = collectionModification$.pipe(debounceTime(50));
         collectionModification$
@@ -316,11 +380,12 @@ export class ElasticsearchPlugin implements OnVendureBootstrap {
             // The delay prevents a "TransactionNotStartedError" (in SQLite/sqljs) by allowing any existing
             // transactions to complete before a new job is added to the queue (assuming the SQL-based
             // JobQueueStrategy).
+            // TODO: should be able to remove owing to f0fd6625
             .pipe(delay(1))
             .subscribe(event => {
                 const defaultTaxZone = event.ctx.channel.defaultTaxZone;
                 if (defaultTaxZone && idsAreEqual(defaultTaxZone.id, event.taxRate.zone.id)) {
-                    return this.elasticsearchService.updateAll(event.ctx);
+                    return this.elasticsearchService.reindex(event.ctx);
                 }
             });
     }

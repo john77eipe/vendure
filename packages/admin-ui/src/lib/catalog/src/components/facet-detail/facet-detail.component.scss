@@ -1,5 +1,14 @@
-@import "variables";
 
 .visible-toggle {
     margin-top: -3px !important;
+}
+
+tr.facet-value td {
+    vertical-align: middle;
+}
+
+.pagination-wrapper {
+    display: flex;
+    justify-content: space-between;
+    padding: var(--card-padding);
 }

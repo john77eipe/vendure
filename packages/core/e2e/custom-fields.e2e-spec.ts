@@ -1,8 +1,11 @@
 import { LanguageCode } from '@vendure/common/lib/generated-types';
-import { CustomFields, mergeConfig } from '@vendure/core';
+import { Asset, CustomFields, mergeConfig, TransactionalConnection } from '@vendure/core';
 import { createTestEnvironment } from '@vendure/testing';
+import { fail } from 'assert';
 import gql from 'graphql-tag';
 import path from 'path';
+import { vi } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { initialData } from '../../../e2e-common/e2e-initial-data';
 import { testConfig, TEST_SETUP_TIMEOUT_MS } from '../../../e2e-common/test-config';
@@ -12,9 +15,11 @@ import { fixPostgresTimezone } from './utils/fix-pg-timezone';
 
 fixPostgresTimezone();
 
-// tslint:disable:no-non-null-assertion
+/* eslint-disable @typescript-eslint/no-non-null-assertion */
 
-const customConfig = mergeConfig(testConfig, {
+const validateInjectorSpy = vi.fn();
+
+const customConfig = mergeConfig(testConfig(), {
     dbConnectionOptions: {
         timezone: 'Z',
     },
@@ -25,7 +30,7 @@ const customConfig = mergeConfig(testConfig, {
             { name: 'stringWithDefault', type: 'string', defaultValue: 'hello' },
             { name: 'localeStringWithDefault', type: 'localeString', defaultValue: 'hola' },
             { name: 'intWithDefault', type: 'int', defaultValue: 5 },
-            { name: 'floatWithDefault', type: 'float', defaultValue: 5.5 },
+            { name: 'floatWithDefault', type: 'float', defaultValue: 5.5678 },
             { name: 'booleanWithDefault', type: 'boolean', defaultValue: true },
             {
                 name: 'dateTimeWithDefault',
@@ -47,7 +52,7 @@ const customConfig = mergeConfig(testConfig, {
                 type: 'string',
                 validate: value => {
                     if (value !== 'valid') {
-                        return `The value ['${value}'] is not valid`;
+                        return `The value ['${value as string}'] is not valid`;
                     }
                 },
             },
@@ -59,15 +64,46 @@ const customConfig = mergeConfig(testConfig, {
                         return [
                             {
                                 languageCode: LanguageCode.en,
-                                value: `The value ['${value}'] is not valid`,
+                                value: `The value ['${value as string}'] is not valid`,
                             },
                         ];
                     }
                 },
             },
             {
+                name: 'validateFn3',
+                type: 'string',
+                validate: (value, injector) => {
+                    const connection = injector.get(TransactionalConnection);
+                    validateInjectorSpy(connection);
+                },
+            },
+            {
+                name: 'validateFn4',
+                type: 'string',
+                validate: async (value, injector) => {
+                    await new Promise(resolve => setTimeout(resolve, 1));
+                    return 'async error';
+                },
+            },
+            {
+                name: 'validateRelation',
+                type: 'relation',
+                entity: Asset,
+                validate: async value => {
+                    await new Promise(resolve => setTimeout(resolve, 1));
+                    return 'relation error';
+                },
+            },
+            {
                 name: 'stringWithOptions',
                 type: 'string',
+                options: [{ value: 'small' }, { value: 'medium' }, { value: 'large' }],
+            },
+            {
+                name: 'nullableStringWithOptions',
+                type: 'string',
+                nullable: true,
                 options: [{ value: 'small' }, { value: 'medium' }, { value: 'large' }],
             },
             {
@@ -124,9 +160,14 @@ const customConfig = mergeConfig(testConfig, {
                 list: true,
                 validate: value => {
                     if (!value.includes(42)) {
-                        return `Must include the number 42!`;
+                        return 'Must include the number 42!';
                     }
                 },
+            },
+            {
+                name: 'uniqueString',
+                type: 'string',
+                unique: true,
             },
         ],
         Facet: [
@@ -140,6 +181,27 @@ const customConfig = mergeConfig(testConfig, {
                 name: 'score',
                 type: 'int',
                 readonly: true,
+            },
+        ],
+        Collection: [
+            { name: 'secretKey1', type: 'string', defaultValue: '', public: false, internal: true },
+            { name: 'secretKey2', type: 'string', defaultValue: '', public: false, internal: false },
+        ],
+        OrderLine: [{ name: 'validateInt', type: 'int', min: 0, max: 10 }],
+        ProductVariantPrice: [
+            {
+                name: 'costPrice',
+                type: 'int',
+            }
+        ],  
+        // Single readonly Address custom field to test
+        // https://github.com/vendure-ecommerce/vendure/issues/3326
+        Address: [
+            {
+                name: 'hereId',
+                type: 'string',
+                readonly: true,
+                nullable: true,
             },
         ],
     } as CustomFields,
@@ -173,6 +235,9 @@ describe('Custom fields', () => {
                                     type
                                     list
                                 }
+                                ... on RelationCustomFieldConfig {
+                                    scalarFields
+                                }
                             }
                         }
                     }
@@ -197,7 +262,29 @@ describe('Custom fields', () => {
                 { name: 'validateDateTime', type: 'datetime', list: false },
                 { name: 'validateFn1', type: 'string', list: false },
                 { name: 'validateFn2', type: 'string', list: false },
+                { name: 'validateFn3', type: 'string', list: false },
+                { name: 'validateFn4', type: 'string', list: false },
+                {
+                    name: 'validateRelation',
+                    type: 'relation',
+                    list: false,
+                    scalarFields: [
+                        'id',
+                        'createdAt',
+                        'updatedAt',
+                        'name',
+                        'type',
+                        'fileSize',
+                        'mimeType',
+                        'width',
+                        'height',
+                        'source',
+                        'preview',
+                        'customFields',
+                    ],
+                },
                 { name: 'stringWithOptions', type: 'string', list: false },
+                { name: 'nullableStringWithOptions', type: 'string', list: false },
                 { name: 'nonPublic', type: 'string', list: false },
                 { name: 'public', type: 'string', list: false },
                 { name: 'longString', type: 'string', list: false },
@@ -207,6 +294,90 @@ describe('Custom fields', () => {
                 { name: 'localeStringList', type: 'localeString', list: true },
                 { name: 'stringListWithDefault', type: 'string', list: true },
                 { name: 'intListWithValidation', type: 'int', list: true },
+                { name: 'uniqueString', type: 'string', list: false },
+                // The internal type should not be exposed at all
+                // { name: 'internalString', type: 'string' },
+            ],
+        });
+    });
+
+    it('globalSettings.serverConfig.entityCustomFields', async () => {
+        const { globalSettings } = await adminClient.query(gql`
+            query {
+                globalSettings {
+                    serverConfig {
+                        entityCustomFields {
+                            entityName
+                            customFields {
+                                ... on CustomField {
+                                    name
+                                    type
+                                    list
+                                }
+                                ... on RelationCustomFieldConfig {
+                                    scalarFields
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        `);
+
+        const productCustomFields = globalSettings.serverConfig.entityCustomFields.find(
+            e => e.entityName === 'Product',
+        );
+        expect(productCustomFields).toEqual({
+            entityName: 'Product',
+            customFields: [
+                { name: 'nullable', type: 'string', list: false },
+                { name: 'notNullable', type: 'string', list: false },
+                { name: 'stringWithDefault', type: 'string', list: false },
+                { name: 'localeStringWithDefault', type: 'localeString', list: false },
+                { name: 'intWithDefault', type: 'int', list: false },
+                { name: 'floatWithDefault', type: 'float', list: false },
+                { name: 'booleanWithDefault', type: 'boolean', list: false },
+                { name: 'dateTimeWithDefault', type: 'datetime', list: false },
+                { name: 'validateString', type: 'string', list: false },
+                { name: 'validateLocaleString', type: 'localeString', list: false },
+                { name: 'validateInt', type: 'int', list: false },
+                { name: 'validateFloat', type: 'float', list: false },
+                { name: 'validateDateTime', type: 'datetime', list: false },
+                { name: 'validateFn1', type: 'string', list: false },
+                { name: 'validateFn2', type: 'string', list: false },
+                { name: 'validateFn3', type: 'string', list: false },
+                { name: 'validateFn4', type: 'string', list: false },
+                {
+                    name: 'validateRelation',
+                    type: 'relation',
+                    list: false,
+                    scalarFields: [
+                        'id',
+                        'createdAt',
+                        'updatedAt',
+                        'name',
+                        'type',
+                        'fileSize',
+                        'mimeType',
+                        'width',
+                        'height',
+                        'source',
+                        'preview',
+                        'customFields',
+                    ],
+                },
+                { name: 'stringWithOptions', type: 'string', list: false },
+                { name: 'nullableStringWithOptions', type: 'string', list: false },
+                { name: 'nonPublic', type: 'string', list: false },
+                { name: 'public', type: 'string', list: false },
+                { name: 'longString', type: 'string', list: false },
+                { name: 'longLocaleString', type: 'localeString', list: false },
+                { name: 'readonlyString', type: 'string', list: false },
+                { name: 'stringList', type: 'string', list: true },
+                { name: 'localeStringList', type: 'localeString', list: true },
+                { name: 'stringListWithDefault', type: 'string', list: true },
+                { name: 'intListWithValidation', type: 'int', list: true },
+                { name: 'uniqueString', type: 'string', list: false },
                 // The internal type should not be exposed at all
                 // { name: 'internalString', type: 'string' },
             ],
@@ -280,12 +451,12 @@ describe('Custom fields', () => {
             stringWithDefault: 'hello',
             localeStringWithDefault: 'hola',
             intWithDefault: 5,
-            floatWithDefault: 5.5,
+            floatWithDefault: 5.5678,
             booleanWithDefault: true,
             dateTimeWithDefault: '2019-04-30T12:59:16.415Z',
             // MySQL does not support defaults on TEXT fields, which is what "simple-json" uses
             // internally. See https://stackoverflow.com/q/3466872/772859
-            stringListWithDefault: testConfig.dbConnectionOptions.type === 'mysql' ? null : ['cat'],
+            stringListWithDefault: customConfig.dbConnectionOptions.type === 'mysql' ? null : ['cat'],
         };
 
         expect(product).toEqual({
@@ -305,7 +476,7 @@ describe('Custom fields', () => {
                     }
                 }
             `);
-        }, "The custom field 'notNullable' value cannot be set to null"),
+        }, 'The custom field "notNullable" value cannot be set to null'),
     );
 
     it(
@@ -318,7 +489,7 @@ describe('Custom fields', () => {
                     }
                 }
             `);
-        }, `Field "readonlyString" is not defined by type "UpdateProductCustomFieldsInput"`),
+        }, 'Field "readonlyString" is not defined by type "UpdateProductCustomFieldsInput"'),
     );
 
     it(
@@ -333,7 +504,7 @@ describe('Custom fields', () => {
                     }
                 }
             `);
-        }, `The custom field 'score' is readonly`),
+        }, 'The custom field "score" is readonly'),
     );
 
     it(
@@ -351,14 +522,14 @@ describe('Custom fields', () => {
                     }
                 }
             `);
-        }, `Field "readonlyString" is not defined by type "CreateProductCustomFieldsInput"`),
+        }, 'Field "readonlyString" is not defined by type "CreateProductCustomFieldsInput"'),
     );
 
     it('string length allows long strings', async () => {
         const longString = Array.from({ length: 500 }, v => 'hello there!').join(' ');
         const result = await adminClient.query(
             gql`
-                mutation($stringValue: String!) {
+                mutation ($stringValue: String!) {
                     updateProduct(input: { id: "T_1", customFields: { longString: $stringValue } }) {
                         id
                         customFields {
@@ -377,7 +548,7 @@ describe('Custom fields', () => {
         const longString = Array.from({ length: 500 }, v => 'hello there!').join(' ');
         const result = await adminClient.query(
             gql`
-                mutation($stringValue: String!) {
+                mutation ($stringValue: String!) {
                     updateProduct(
                         input: {
                             id: "T_1"
@@ -410,7 +581,7 @@ describe('Custom fields', () => {
                         }
                     }
                 `);
-            }, `The custom field 'validateString' value ['hello'] does not match the pattern [^[0-9][a-z]+$]`),
+            }, 'The custom field "validateString" value ["hello"] does not match the pattern [^[0-9][a-z]+$]'),
         );
 
         it(
@@ -423,7 +594,7 @@ describe('Custom fields', () => {
                         }
                     }
                 `);
-            }, `The custom field 'stringWithOptions' value ['tiny'] is invalid. Valid options are ['small', 'medium', 'large']`),
+            }, "The custom field \"stringWithOptions\" value [\"tiny\"] is invalid. Valid options are ['small', 'medium', 'large']"),
         );
 
         it('valid string option', async () => {
@@ -438,6 +609,20 @@ describe('Custom fields', () => {
                 }
             `);
             expect(updateProduct.customFields.stringWithOptions).toBe('medium');
+        });
+
+        it('nullable string option with null', async () => {
+            const { updateProduct } = await adminClient.query(gql`
+                mutation {
+                    updateProduct(input: { id: "T_1", customFields: { nullableStringWithOptions: null } }) {
+                        id
+                        customFields {
+                            nullableStringWithOptions
+                        }
+                    }
+                }
+            `);
+            expect(updateProduct.customFields.nullableStringWithOptions).toBeNull();
         });
 
         it(
@@ -461,7 +646,7 @@ describe('Custom fields', () => {
                         }
                     }
                 `);
-            }, `The custom field 'validateLocaleString' value ['servus'] does not match the pattern [^[0-9][a-z]+$]`),
+            }, 'The custom field "validateLocaleString" value ["servus"] does not match the pattern [^[0-9][a-z]+$]'),
         );
 
         it(
@@ -474,7 +659,7 @@ describe('Custom fields', () => {
                         }
                     }
                 `);
-            }, `The custom field 'validateInt' value [12] is greater than the maximum [10]`),
+            }, 'The custom field "validateInt" value [12] is greater than the maximum [10]'),
         );
 
         it(
@@ -487,7 +672,7 @@ describe('Custom fields', () => {
                         }
                     }
                 `);
-            }, `The custom field 'validateFloat' value [10.6] is greater than the maximum [10.5]`),
+            }, 'The custom field "validateFloat" value [10.6] is greater than the maximum [10.5]'),
         );
 
         it(
@@ -505,7 +690,7 @@ describe('Custom fields', () => {
                         }
                     }
                 `);
-            }, `The custom field 'validateDateTime' value [2019-01-01T05:25:00.000Z] is less than the minimum [2019-01-01T08:30]`),
+            }, 'The custom field "validateDateTime" value [2019-01-01T05:25:00.000Z] is less than the minimum [2019-01-01T08:30]'),
         );
 
         it(
@@ -518,7 +703,7 @@ describe('Custom fields', () => {
                         }
                     }
                 `);
-            }, `The value ['invalid'] is not valid`),
+            }, "The value ['invalid'] is not valid"),
         );
 
         it(
@@ -531,7 +716,7 @@ describe('Custom fields', () => {
                         }
                     }
                 `);
-            }, `The value ['invalid'] is not valid`),
+            }, "The value ['invalid'] is not valid"),
         );
 
         it(
@@ -546,7 +731,7 @@ describe('Custom fields', () => {
                         }
                     }
                 `);
-            }, `Must include the number 42!`),
+            }, 'Must include the number 42!'),
         );
 
         it('valid list field', async () => {
@@ -561,6 +746,156 @@ describe('Custom fields', () => {
                 }
             `);
             expect(updateProduct.customFields.intListWithValidation).toEqual([1, 42, 3]);
+        });
+
+        it('can inject providers into validation fn', async () => {
+            const { updateProduct } = await adminClient.query(gql`
+                mutation {
+                    updateProduct(input: { id: "T_1", customFields: { validateFn3: "some value" } }) {
+                        id
+                        customFields {
+                            validateFn3
+                        }
+                    }
+                }
+            `);
+            expect(updateProduct.customFields.validateFn3).toBe('some value');
+            expect(validateInjectorSpy).toHaveBeenCalledTimes(1);
+            expect(validateInjectorSpy.mock.calls[0][0] instanceof TransactionalConnection).toBe(true);
+        });
+
+        it(
+            'supports async validation fn',
+            assertThrowsWithMessage(async () => {
+                await adminClient.query(gql`
+                    mutation {
+                        updateProduct(input: { id: "T_1", customFields: { validateFn4: "some value" } }) {
+                            id
+                            customFields {
+                                validateFn4
+                            }
+                        }
+                    }
+                `);
+            }, 'async error'),
+        );
+
+        // https://github.com/vendure-ecommerce/vendure/issues/1000
+        it(
+            'supports validation of relation types',
+            assertThrowsWithMessage(async () => {
+                await adminClient.query(gql`
+                    mutation {
+                        updateProduct(input: { id: "T_1", customFields: { validateRelationId: "T_1" } }) {
+                            id
+                            customFields {
+                                validateFn4
+                            }
+                        }
+                    }
+                `);
+            }, 'relation error'),
+        );
+
+        // https://github.com/vendure-ecommerce/vendure/issues/1091
+        it('handles well graphql internal fields', async () => {
+            // throws "Cannot read property 'args' of undefined" if broken
+            await adminClient.query(gql`
+                mutation {
+                    __typename
+                    updateProduct(input: { id: "T_1", customFields: { nullable: "some value" } }) {
+                        __typename
+                        id
+                        customFields {
+                            __typename
+                            nullable
+                        }
+                    }
+                }
+            `);
+        });
+
+        // https://github.com/vendure-ecommerce/vendure/issues/1953
+        describe('validation of OrderLine custom fields', () => {
+            it('addItemToOrder', async () => {
+                try {
+                    const { addItemToOrder } = await shopClient.query(gql`
+                        mutation {
+                            addItemToOrder(
+                                productVariantId: 1
+                                quantity: 1
+                                customFields: { validateInt: 11 }
+                            ) {
+                                ... on Order {
+                                    id
+                                }
+                            }
+                        }
+                    `);
+                    fail('Should have thrown');
+                } catch (e) {
+                    expect(e.message).toContain(
+                        'The custom field "validateInt" value [11] is greater than the maximum [10]',
+                    );
+                }
+
+                const { addItemToOrder: result } = await shopClient.query(gql`
+                    mutation {
+                        addItemToOrder(productVariantId: 1, quantity: 1, customFields: { validateInt: 9 }) {
+                            ... on Order {
+                                id
+                                lines {
+                                    customFields {
+                                        validateInt
+                                    }
+                                }
+                            }
+                        }
+                    }
+                `);
+
+                expect(result.lines[0].customFields).toEqual({ validateInt: 9 });
+            });
+
+            it('adjustOrderLine', async () => {
+                try {
+                    const { adjustOrderLine } = await shopClient.query(gql`
+                        mutation {
+                            adjustOrderLine(
+                                orderLineId: "T_1"
+                                quantity: 1
+                                customFields: { validateInt: 11 }
+                            ) {
+                                ... on Order {
+                                    id
+                                }
+                            }
+                        }
+                    `);
+                    fail('Should have thrown');
+                } catch (e) {
+                    expect(e.message).toContain(
+                        'The custom field "validateInt" value [11] is greater than the maximum [10]',
+                    );
+                }
+
+                const { adjustOrderLine: result } = await shopClient.query(gql`
+                    mutation {
+                        adjustOrderLine(orderLineId: "T_1", quantity: 1, customFields: { validateInt: 2 }) {
+                            ... on Order {
+                                id
+                                lines {
+                                    customFields {
+                                        validateInt
+                                    }
+                                }
+                            }
+                        }
+                    }
+                `);
+
+                expect(result.lines[0].customFields).toEqual({ validateInt: 2 });
+            });
         });
     });
 
@@ -578,7 +913,7 @@ describe('Custom fields', () => {
                         }
                     }
                 `);
-            }, `Cannot query field "nonPublic" on type "ProductCustomFields"`),
+            }, 'Cannot query field "nonPublic" on type "ProductCustomFields"'),
         );
 
         it('publicly accessible via Shop API', async () => {
@@ -609,7 +944,7 @@ describe('Custom fields', () => {
                         }
                     }
                 `);
-            }, `Cannot query field "internalString" on type "ProductCustomFields"`),
+            }, 'Cannot query field "internalString" on type "ProductCustomFields"'),
         );
 
         it(
@@ -625,8 +960,22 @@ describe('Custom fields', () => {
                         }
                     }
                 `);
-            }, `Cannot query field "internalString" on type "ProductCustomFields"`),
+            }, 'Cannot query field "internalString" on type "ProductCustomFields"'),
         );
+
+        // https://github.com/vendure-ecommerce/vendure/issues/3049
+        it('does not leak private fields via JSON type', async () => {
+            const { collection } = await shopClient.query(gql`
+                query {
+                    collection(id: "T_1") {
+                        id
+                        customFields
+                    }
+                }
+            `);
+
+            expect(collection.customFields).toBe(null);
+        });
     });
 
     describe('sort & filter', () => {
@@ -634,6 +983,19 @@ describe('Custom fields', () => {
             const { products } = await adminClient.query(gql`
                 query {
                     products(options: { sort: { nullable: ASC } }) {
+                        totalItems
+                    }
+                }
+            `);
+
+            expect(products.totalItems).toBe(1);
+        });
+
+        // https://github.com/vendure-ecommerce/vendure/issues/1581
+        it('can sort by localeString custom fields', async () => {
+            const { products } = await adminClient.query(gql`
+                query {
+                    products(options: { sort: { localeStringWithDefault: ASC } }) {
                         totalItems
                     }
                 }
@@ -654,6 +1016,52 @@ describe('Custom fields', () => {
             expect(products.totalItems).toBe(1);
         });
 
+        it('can filter by localeString custom fields', async () => {
+            const { products } = await adminClient.query(gql`
+                query {
+                    products(options: { filter: { localeStringWithDefault: { contains: "hola" } } }) {
+                        totalItems
+                    }
+                }
+            `);
+
+            expect(products.totalItems).toBe(1);
+        });
+
+        it('can filter by custom list fields', async () => {
+            const { products: result1 } = await adminClient.query(gql`
+                query {
+                    products(options: { filter: { intListWithValidation: { inList: 42 } } }) {
+                        totalItems
+                    }
+                }
+            `);
+
+            expect(result1.totalItems).toBe(1);
+            const { products: result2 } = await adminClient.query(gql`
+                query {
+                    products(options: { filter: { intListWithValidation: { inList: 43 } } }) {
+                        totalItems
+                    }
+                }
+            `);
+
+            expect(result2.totalItems).toBe(0);
+        });
+
+        it(
+            'cannot sort by custom list fields',
+            assertThrowsWithMessage(async () => {
+                await adminClient.query(gql`
+                    query {
+                        products(options: { sort: { intListWithValidation: ASC } }) {
+                            totalItems
+                        }
+                    }
+                `);
+            }, 'Field "intListWithValidation" is not defined by type "ProductSortParameter".'),
+        );
+
         it(
             'cannot filter by internal field in Admin API',
             assertThrowsWithMessage(async () => {
@@ -664,7 +1072,7 @@ describe('Custom fields', () => {
                         }
                     }
                 `);
-            }, `Field "internalString" is not defined by type "ProductFilterParameter"`),
+            }, 'Field "internalString" is not defined by type "ProductFilterParameter"'),
         );
 
         it(
@@ -677,7 +1085,135 @@ describe('Custom fields', () => {
                         }
                     }
                 `);
-            }, `Field "internalString" is not defined by type "ProductFilterParameter"`),
+            }, 'Field "internalString" is not defined by type "ProductFilterParameter"'),
         );
+    });
+
+    describe('product on productVariant entity', () => {
+        it('is translated', async () => {
+            const { productVariants } = await adminClient.query(gql`
+                query {
+                    productVariants(productId: "T_1") {
+                        items {
+                            product {
+                                name
+                                id
+                                customFields {
+                                    localeStringWithDefault
+                                    stringWithDefault
+                                }
+                            }
+                        }
+                    }
+                }
+            `);
+
+            expect(productVariants.items[0].product).toEqual({
+                id: 'T_1',
+                name: 'Laptop',
+                customFields: {
+                    localeStringWithDefault: 'hola',
+                    stringWithDefault: 'hello',
+                },
+            });
+        });
+    });
+
+    describe('unique constraint', () => {
+        it('setting unique value works', async () => {
+            const result = await adminClient.query(gql`
+                mutation {
+                    updateProduct(input: { id: "T_1", customFields: { uniqueString: "foo" } }) {
+                        id
+                        customFields {
+                            uniqueString
+                        }
+                    }
+                }
+            `);
+
+            expect(result.updateProduct.customFields.uniqueString).toBe('foo');
+        });
+
+        it('setting conflicting value fails', async () => {
+            try {
+                await adminClient.query(gql`
+                    mutation {
+                        createProduct(
+                            input: {
+                                translations: [
+                                    { languageCode: en, name: "test 2", slug: "test-2", description: "" }
+                                ]
+                                customFields: { uniqueString: "foo" }
+                            }
+                        ) {
+                            id
+                        }
+                    }
+                `);
+                fail('Should have thrown');
+            } catch (e: any) {
+                let duplicateKeyErrMessage = 'unassigned';
+                switch (customConfig.dbConnectionOptions.type) {
+                    case 'mariadb':
+                    case 'mysql':
+                        duplicateKeyErrMessage = "ER_DUP_ENTRY: Duplicate entry 'foo' for key";
+                        break;
+                    case 'postgres':
+                        duplicateKeyErrMessage = 'duplicate key value violates unique constraint';
+                        break;
+                    case 'sqlite':
+                    case 'sqljs':
+                        duplicateKeyErrMessage = 'UNIQUE constraint failed: product.customFieldsUniquestring';
+                        break;
+                }
+                expect(e.message).toContain(duplicateKeyErrMessage);
+            }
+        });
+    });
+
+    it('on ProductVariantPrice', async () => {
+        const { updateProductVariants } = await adminClient.query(
+            gql`
+                mutation UpdateProductVariants($input: [UpdateProductVariantInput!]!) {
+                    updateProductVariants(input: $input) {
+                        id
+                        prices {
+                            currencyCode
+                            price
+                            customFields {
+                                costPrice
+                            }
+                        }
+                    }
+                }
+            `,
+            {
+                input: [
+                    {
+                        id: 'T_1',
+                        prices: [
+                            {
+                                price: 129900,
+                                currencyCode: 'USD',
+                                customFields: {
+                                    costPrice: 100,
+                                },
+                            },
+                        ],
+                    },
+                ],
+            },
+        );
+
+        expect(updateProductVariants[0].prices).toEqual([
+            {
+                currencyCode: 'USD',
+                price: 129900,
+                customFields: {
+                    costPrice: 100,
+                },
+            },
+        ]);
     });
 });

@@ -1,4 +1,4 @@
-/* tslint:disable:no-non-null-assertion */
+/* eslint-disable @typescript-eslint/no-non-null-assertion */
 import {
     defaultShippingCalculator,
     defaultShippingEligibilityChecker,
@@ -7,25 +7,21 @@ import {
 import { createTestEnvironment } from '@vendure/testing';
 import gql from 'graphql-tag';
 import path from 'path';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { initialData } from '../../../e2e-common/e2e-initial-data';
 import { testConfig, TEST_SETUP_TIMEOUT_MS } from '../../../e2e-common/test-config';
+import { manualFulfillmentHandler } from '../src/config/fulfillment/manual-fulfillment-handler';
 
 import { SHIPPING_METHOD_FRAGMENT } from './graphql/fragments';
+import * as Codegen from './graphql/generated-e2e-admin-types';
+import { DeletionResult, LanguageCode } from './graphql/generated-e2e-admin-types';
 import {
-    CreateShippingMethod,
-    DeleteShippingMethod,
-    DeletionResult,
-    GetCalculators,
-    GetEligibilityCheckers,
-    GetShippingMethod,
-    GetShippingMethodList,
-    LanguageCode,
-    TestEligibleMethods,
-    TestShippingMethod,
-    UpdateShippingMethod,
-} from './graphql/generated-e2e-admin-types';
-import { CREATE_SHIPPING_METHOD } from './graphql/shared-definitions';
+    CREATE_SHIPPING_METHOD,
+    DELETE_SHIPPING_METHOD,
+    GET_SHIPPING_METHOD_LIST,
+    UPDATE_SHIPPING_METHOD,
+} from './graphql/shared-definitions';
 
 const TEST_METADATA = {
     foo: 'bar',
@@ -39,7 +35,8 @@ const calculatorWithMetadata = new ShippingCalculator({
     calculate: () => {
         return {
             price: 100,
-            priceWithTax: 100,
+            priceIncludesTax: true,
+            taxRate: 0,
             metadata: TEST_METADATA,
         };
     },
@@ -47,7 +44,7 @@ const calculatorWithMetadata = new ShippingCalculator({
 
 describe('ShippingMethod resolver', () => {
     const { server, adminClient, shopClient } = createTestEnvironment({
-        ...testConfig,
+        ...testConfig(),
         shippingOptions: {
             shippingEligibilityCheckers: [defaultShippingEligibilityChecker],
             shippingCalculators: [defaultShippingCalculator, calculatorWithMetadata],
@@ -68,7 +65,7 @@ describe('ShippingMethod resolver', () => {
     });
 
     it('shippingEligibilityCheckers', async () => {
-        const { shippingEligibilityCheckers } = await adminClient.query<GetEligibilityCheckers.Query>(
+        const { shippingEligibilityCheckers } = await adminClient.query<Codegen.GetEligibilityCheckersQuery>(
             GET_ELIGIBILITY_CHECKERS,
         );
 
@@ -92,7 +89,7 @@ describe('ShippingMethod resolver', () => {
     });
 
     it('shippingCalculators', async () => {
-        const { shippingCalculators } = await adminClient.query<GetCalculators.Query>(GET_CALCULATORS);
+        const { shippingCalculators } = await adminClient.query<Codegen.GetCalculatorsQuery>(GET_CALCULATORS);
 
         expect(shippingCalculators).toEqual([
             {
@@ -105,6 +102,31 @@ describe('ShippingMethod resolver', () => {
                         label: 'Shipping price',
                         name: 'rate',
                         type: 'int',
+                    },
+                    {
+                        label: 'Price includes tax',
+                        name: 'includesTax',
+                        type: 'string',
+                        description: null,
+                        ui: {
+                            component: 'select-form-input',
+                            options: [
+                                {
+                                    label: [{ languageCode: LanguageCode.en, value: 'Includes tax' }],
+                                    value: 'include',
+                                },
+                                {
+                                    label: [{ languageCode: LanguageCode.en, value: 'Excludes tax' }],
+                                    value: 'exclude',
+                                },
+                                {
+                                    label: [
+                                        { languageCode: LanguageCode.en, value: 'Auto (based on Channel)' },
+                                    ],
+                                    value: 'auto',
+                                },
+                            ],
+                        },
                     },
                     {
                         ui: {
@@ -129,18 +151,19 @@ describe('ShippingMethod resolver', () => {
     });
 
     it('shippingMethods', async () => {
-        const { shippingMethods } = await adminClient.query<GetShippingMethodList.Query>(
+        const { shippingMethods } = await adminClient.query<Codegen.GetShippingMethodListQuery>(
             GET_SHIPPING_METHOD_LIST,
         );
-        expect(shippingMethods.totalItems).toEqual(2);
+        expect(shippingMethods.totalItems).toEqual(3);
         expect(shippingMethods.items[0].code).toBe('standard-shipping');
         expect(shippingMethods.items[1].code).toBe('express-shipping');
+        expect(shippingMethods.items[2].code).toBe('express-shipping-taxed');
     });
 
     it('shippingMethod', async () => {
         const { shippingMethod } = await adminClient.query<
-            GetShippingMethod.Query,
-            GetShippingMethod.Variables
+            Codegen.GetShippingMethodQuery,
+            Codegen.GetShippingMethodQueryVariables
         >(GET_SHIPPING_METHOD, {
             id: 'T_1',
         });
@@ -149,11 +172,12 @@ describe('ShippingMethod resolver', () => {
 
     it('createShippingMethod', async () => {
         const { createShippingMethod } = await adminClient.query<
-            CreateShippingMethod.Mutation,
-            CreateShippingMethod.Variables
+            Codegen.CreateShippingMethodMutation,
+            Codegen.CreateShippingMethodMutationVariables
         >(CREATE_SHIPPING_METHOD, {
             input: {
                 code: 'new-method',
+                fulfillmentHandler: manualFulfillmentHandler.code,
                 checker: {
                     code: defaultShippingEligibilityChecker.code,
                     arguments: [
@@ -172,23 +196,30 @@ describe('ShippingMethod resolver', () => {
         });
 
         expect(createShippingMethod).toEqual({
-            id: 'T_3',
+            id: 'T_4',
             code: 'new-method',
             name: 'new method',
             description: '',
             calculator: {
                 code: 'calculator-with-metadata',
+                args: [],
             },
             checker: {
                 code: 'default-shipping-eligibility-checker',
+                args: [
+                    {
+                        name: 'orderMinimum',
+                        value: '0',
+                    },
+                ],
             },
         });
     });
 
     it('testShippingMethod', async () => {
         const { testShippingMethod } = await adminClient.query<
-            TestShippingMethod.Query,
-            TestShippingMethod.Variables
+            Codegen.TestShippingMethodQuery,
+            Codegen.TestShippingMethodQueryVariables
         >(TEST_SHIPPING_METHOD, {
             input: {
                 calculator: {
@@ -224,8 +255,8 @@ describe('ShippingMethod resolver', () => {
 
     it('testEligibleShippingMethods', async () => {
         const { testEligibleShippingMethods } = await adminClient.query<
-            TestEligibleMethods.Query,
-            TestEligibleMethods.Variables
+            Codegen.TestEligibleMethodsQuery,
+            Codegen.TestEligibleMethodsQueryVariables
         >(TEST_ELIGIBLE_SHIPPING_METHODS, {
             input: {
                 lines: [{ productVariantId: 'T_1', quantity: 1 }],
@@ -238,7 +269,7 @@ describe('ShippingMethod resolver', () => {
 
         expect(testEligibleShippingMethods).toEqual([
             {
-                id: 'T_3',
+                id: 'T_4',
                 name: 'new method',
                 description: '',
                 price: 100,
@@ -262,16 +293,24 @@ describe('ShippingMethod resolver', () => {
                 priceWithTax: 1000,
                 metadata: null,
             },
+            {
+                id: 'T_3',
+                name: 'Express Shipping (Taxed)',
+                description: '',
+                price: 1000,
+                priceWithTax: 1200,
+                metadata: null,
+            },
         ]);
     });
 
     it('updateShippingMethod', async () => {
         const { updateShippingMethod } = await adminClient.query<
-            UpdateShippingMethod.Mutation,
-            UpdateShippingMethod.Variables
+            Codegen.UpdateShippingMethodMutation,
+            Codegen.UpdateShippingMethodMutationVariables
         >(UPDATE_SHIPPING_METHOD, {
             input: {
-                id: 'T_3',
+                id: 'T_4',
                 translations: [{ languageCode: LanguageCode.en, name: 'changed method', description: '' }],
             },
         });
@@ -280,14 +319,16 @@ describe('ShippingMethod resolver', () => {
     });
 
     it('deleteShippingMethod', async () => {
-        const listResult1 = await adminClient.query<GetShippingMethodList.Query>(GET_SHIPPING_METHOD_LIST);
-        expect(listResult1.shippingMethods.items.map(i => i.id)).toEqual(['T_1', 'T_2', 'T_3']);
+        const listResult1 = await adminClient.query<Codegen.GetShippingMethodListQuery>(
+            GET_SHIPPING_METHOD_LIST,
+        );
+        expect(listResult1.shippingMethods.items.map(i => i.id)).toEqual(['T_1', 'T_2', 'T_3', 'T_4']);
 
         const { deleteShippingMethod } = await adminClient.query<
-            DeleteShippingMethod.Mutation,
-            DeleteShippingMethod.Variables
+            Codegen.DeleteShippingMethodMutation,
+            Codegen.DeleteShippingMethodMutationVariables
         >(DELETE_SHIPPING_METHOD, {
-            id: 'T_3',
+            id: 'T_4',
         });
 
         expect(deleteShippingMethod).toEqual({
@@ -295,22 +336,138 @@ describe('ShippingMethod resolver', () => {
             message: null,
         });
 
-        const listResult2 = await adminClient.query<GetShippingMethodList.Query>(GET_SHIPPING_METHOD_LIST);
-        expect(listResult2.shippingMethods.items.map(i => i.id)).toEqual(['T_1', 'T_2']);
+        const listResult2 = await adminClient.query<Codegen.GetShippingMethodListQuery>(
+            GET_SHIPPING_METHOD_LIST,
+        );
+        expect(listResult2.shippingMethods.items.map(i => i.id)).toEqual(['T_1', 'T_2', 'T_3']);
+    });
+
+    describe('argument ordering', () => {
+        it('createShippingMethod corrects order of arguments', async () => {
+            const { createShippingMethod } = await adminClient.query<
+                Codegen.CreateShippingMethodMutation,
+                Codegen.CreateShippingMethodMutationVariables
+            >(CREATE_SHIPPING_METHOD, {
+                input: {
+                    code: 'new-method',
+                    fulfillmentHandler: manualFulfillmentHandler.code,
+                    checker: {
+                        code: defaultShippingEligibilityChecker.code,
+                        arguments: [
+                            {
+                                name: 'orderMinimum',
+                                value: '0',
+                            },
+                        ],
+                    },
+                    calculator: {
+                        code: defaultShippingCalculator.code,
+                        arguments: [
+                            { name: 'rate', value: '500' },
+                            { name: 'taxRate', value: '20' },
+                            { name: 'includesTax', value: 'include' },
+                        ],
+                    },
+                    translations: [{ languageCode: LanguageCode.en, name: 'new method', description: '' }],
+                },
+            });
+
+            expect(createShippingMethod.calculator).toEqual({
+                code: defaultShippingCalculator.code,
+                args: [
+                    { name: 'rate', value: '500' },
+                    { name: 'includesTax', value: 'include' },
+                    { name: 'taxRate', value: '20' },
+                ],
+            });
+        });
+
+        it('updateShippingMethod corrects order of arguments', async () => {
+            const { updateShippingMethod } = await adminClient.query<
+                Codegen.UpdateShippingMethodMutation,
+                Codegen.UpdateShippingMethodMutationVariables
+            >(UPDATE_SHIPPING_METHOD, {
+                input: {
+                    id: 'T_5',
+                    translations: [],
+                    calculator: {
+                        code: defaultShippingCalculator.code,
+                        arguments: [
+                            { name: 'rate', value: '500' },
+                            { name: 'taxRate', value: '20' },
+                            { name: 'includesTax', value: 'include' },
+                        ],
+                    },
+                },
+            });
+
+            expect(updateShippingMethod.calculator).toEqual({
+                code: defaultShippingCalculator.code,
+                args: [
+                    { name: 'rate', value: '500' },
+                    { name: 'includesTax', value: 'include' },
+                    { name: 'taxRate', value: '20' },
+                ],
+            });
+        });
+
+        it('get shippingMethod preserves correct ordering', async () => {
+            const { shippingMethod } = await adminClient.query<
+                Codegen.GetShippingMethodQuery,
+                Codegen.GetShippingMethodQueryVariables
+            >(GET_SHIPPING_METHOD, {
+                id: 'T_5',
+            });
+
+            expect(shippingMethod?.calculator.args).toEqual([
+                { name: 'rate', value: '500' },
+                { name: 'includesTax', value: 'include' },
+                { name: 'taxRate', value: '20' },
+            ]);
+        });
+
+        it('testShippingMethod corrects order of arguments', async () => {
+            const { testShippingMethod } = await adminClient.query<
+                Codegen.TestShippingMethodQuery,
+                Codegen.TestShippingMethodQueryVariables
+            >(TEST_SHIPPING_METHOD, {
+                input: {
+                    calculator: {
+                        code: defaultShippingCalculator.code,
+                        arguments: [
+                            { name: 'rate', value: '500' },
+                            { name: 'taxRate', value: '0' },
+                            { name: 'includesTax', value: 'include' },
+                        ],
+                    },
+                    checker: {
+                        code: defaultShippingEligibilityChecker.code,
+                        arguments: [
+                            {
+                                name: 'orderMinimum',
+                                value: '0',
+                            },
+                        ],
+                    },
+                    lines: [{ productVariantId: 'T_1', quantity: 1 }],
+                    shippingAddress: {
+                        streetLine1: '',
+                        countryCode: 'GB',
+                    },
+                },
+            });
+
+            expect(testShippingMethod).toEqual({
+                eligible: true,
+                quote: {
+                    metadata: null,
+                    price: 500,
+                    priceWithTax: 500,
+                },
+            });
+        });
     });
 });
-
-const GET_SHIPPING_METHOD_LIST = gql`
-    query GetShippingMethodList {
-        shippingMethods {
-            items {
-                ...ShippingMethod
-            }
-            totalItems
-        }
-    }
-    ${SHIPPING_METHOD_FRAGMENT}
-`;
 
 const GET_SHIPPING_METHOD = gql`
     query GetShippingMethod($id: ID!) {
@@ -319,24 +476,6 @@ const GET_SHIPPING_METHOD = gql`
         }
     }
     ${SHIPPING_METHOD_FRAGMENT}
-`;
-
-const UPDATE_SHIPPING_METHOD = gql`
-    mutation UpdateShippingMethod($input: UpdateShippingMethodInput!) {
-        updateShippingMethod(input: $input) {
-            ...ShippingMethod
-        }
-    }
-    ${SHIPPING_METHOD_FRAGMENT}
-`;
-
-const DELETE_SHIPPING_METHOD = gql`
-    mutation DeleteShippingMethod($id: ID!) {
-        deleteShippingMethod(id: $id) {
-            result
-            message
-        }
-    }
 `;
 
 const GET_ELIGIBILITY_CHECKERS = gql`

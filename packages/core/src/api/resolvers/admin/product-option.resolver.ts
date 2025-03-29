@@ -1,7 +1,10 @@
 import { Args, Mutation, Query, Resolver } from '@nestjs/graphql';
 import {
+    DeletionResponse,
+    DeletionResult,
     MutationCreateProductOptionArgs,
     MutationCreateProductOptionGroupArgs,
+    MutationDeleteProductOptionArgs,
     MutationUpdateProductOptionArgs,
     MutationUpdateProductOptionGroupArgs,
     Permission,
@@ -10,12 +13,13 @@ import {
 } from '@vendure/common/lib/generated-types';
 
 import { Translated } from '../../../common/types/locale-types';
-import { ProductOptionGroup } from '../../../entity/product-option-group/product-option-group.entity';
 import { ProductOption } from '../../../entity/product-option/product-option.entity';
+import { ProductOptionGroup } from '../../../entity/product-option-group/product-option-group.entity';
 import { ProductOptionGroupService } from '../../../service/services/product-option-group.service';
 import { ProductOptionService } from '../../../service/services/product-option.service';
 import { RequestContext } from '../../common/request-context';
 import { Allow } from '../../decorators/allow.decorator';
+import { RelationPaths, Relations } from '../../decorators/relations.decorator';
 import { Ctx } from '../../decorators/request-context.decorator';
 import { Transaction } from '../../decorators/transaction.decorator';
 
@@ -27,26 +31,28 @@ export class ProductOptionResolver {
     ) {}
 
     @Query()
-    @Allow(Permission.ReadCatalog)
+    @Allow(Permission.ReadCatalog, Permission.ReadProduct)
     productOptionGroups(
         @Ctx() ctx: RequestContext,
         @Args() args: QueryProductOptionGroupsArgs,
+        @Relations(ProductOptionGroup) relations: RelationPaths<ProductOptionGroup>,
     ): Promise<Array<Translated<ProductOptionGroup>>> {
         return this.productOptionGroupService.findAll(ctx, args.filterTerm || undefined);
     }
 
     @Query()
-    @Allow(Permission.ReadCatalog)
+    @Allow(Permission.ReadCatalog, Permission.ReadProduct)
     productOptionGroup(
         @Ctx() ctx: RequestContext,
         @Args() args: QueryProductOptionGroupArgs,
+        @Relations(ProductOptionGroup) relations: RelationPaths<ProductOptionGroup>,
     ): Promise<Translated<ProductOptionGroup> | undefined> {
         return this.productOptionGroupService.findOne(ctx, args.id);
     }
 
     @Transaction()
     @Mutation()
-    @Allow(Permission.CreateCatalog)
+    @Allow(Permission.CreateCatalog, Permission.CreateProduct)
     async createProductOptionGroup(
         @Ctx() ctx: RequestContext,
         @Args() args: MutationCreateProductOptionGroupArgs,
@@ -65,7 +71,7 @@ export class ProductOptionResolver {
 
     @Transaction()
     @Mutation()
-    @Allow(Permission.UpdateCatalog)
+    @Allow(Permission.UpdateCatalog, Permission.UpdateProduct)
     async updateProductOptionGroup(
         @Ctx() ctx: RequestContext,
         @Args() args: MutationUpdateProductOptionGroupArgs,
@@ -76,7 +82,7 @@ export class ProductOptionResolver {
 
     @Transaction()
     @Mutation()
-    @Allow(Permission.CreateCatalog)
+    @Allow(Permission.CreateCatalog, Permission.CreateProduct)
     async createProductOption(
         @Ctx() ctx: RequestContext,
         @Args() args: MutationCreateProductOptionArgs,
@@ -87,12 +93,22 @@ export class ProductOptionResolver {
 
     @Transaction()
     @Mutation()
-    @Allow(Permission.UpdateCatalog)
+    @Allow(Permission.UpdateCatalog, Permission.UpdateProduct)
     async updateProductOption(
         @Ctx() ctx: RequestContext,
         @Args() args: MutationUpdateProductOptionArgs,
     ): Promise<Translated<ProductOption>> {
         const { input } = args;
         return this.productOptionService.update(ctx, input);
+    }
+
+    @Transaction()
+    @Mutation()
+    @Allow(Permission.DeleteCatalog, Permission.DeleteProduct)
+    async deleteProductOption(
+        @Ctx() ctx: RequestContext,
+        @Args() { id }: MutationDeleteProductOptionArgs,
+    ): Promise<DeletionResponse> {
+        return this.productOptionService.delete(ctx, id);
     }
 }

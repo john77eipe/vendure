@@ -11,9 +11,10 @@ import {
     ShippingCalculator,
     ShippingEligibilityChecker,
 } from '../../config';
-import { CollectionFilter } from '../../config/collection/collection-filter';
+import { CollectionFilter } from '../../config/catalog/collection-filter';
 import { ConfigService } from '../../config/config.service';
-import { PaymentMethodHandler } from '../../config/payment-method/payment-method-handler';
+import { PaymentMethodEligibilityChecker } from '../../config/payment/payment-method-eligibility-checker';
+import { PaymentMethodHandler } from '../../config/payment/payment-method-handler';
 
 import { IdCodecService } from './id-codec.service';
 
@@ -36,14 +37,13 @@ export class ConfigurableOperationCodec {
             }
             for (const arg of operationInput.arguments) {
                 const argDef = def.args[arg.name];
-                if (argDef.type === 'ID' && arg.value) {
+                if (argDef && argDef.type === 'ID' && arg.value) {
                     if (argDef.list === true) {
                         const ids = JSON.parse(arg.value) as string[];
                         const decodedIds = ids.map(id => this.idCodecService.decode(id));
                         arg.value = JSON.stringify(decodedIds);
                     } else {
-                        const decodedId = this.idCodecService.decode(arg.value);
-                        arg.value = JSON.stringify(decodedId);
+                        arg.value = this.idCodecService.decode(arg.value);
                     }
                 }
             }
@@ -66,7 +66,7 @@ export class ConfigurableOperationCodec {
             }
             for (const arg of operationInput.args) {
                 const argDef = def.args[arg.name];
-                if (argDef.type === 'ID' && arg.value) {
+                if (argDef && argDef.type === 'ID' && arg.value) {
                     if (argDef.list === true) {
                         const ids = JSON.parse(arg.value) as string[];
                         const encodedIds = ids.map(id => this.idCodecService.encode(id));
@@ -87,6 +87,8 @@ export class ConfigurableOperationCodec {
                 return this.configService.catalogOptions.collectionFilters;
             case PaymentMethodHandler:
                 return this.configService.paymentOptions.paymentMethodHandlers;
+            case PaymentMethodEligibilityChecker:
+                return this.configService.paymentOptions.paymentMethodEligibilityCheckers || [];
             case PromotionItemAction:
             case PromotionOrderAction:
                 return this.configService.promotionOptions.promotionActions || [];

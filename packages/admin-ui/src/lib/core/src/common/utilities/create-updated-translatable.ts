@@ -1,7 +1,9 @@
 import { CustomFieldsObject, CustomFieldType } from '@vendure/common/lib/shared-types';
-import { assertNever } from '@vendure/common/lib/shared-utils';
 
 import { CustomFieldConfig, LanguageCode } from '../generated-types';
+
+import { findTranslation } from './find-translation';
+import { getDefaultValue } from './custom-field-default-value';
 
 export interface TranslatableUpdateOptions<T extends { translations: any[] } & MayHaveCustomFields> {
     translatable: T;
@@ -25,26 +27,28 @@ export function createUpdatedTranslatable<T extends { translations: any[] } & Ma
 ): T {
     const { translatable, updatedFields, languageCode, customFieldConfig, defaultTranslation } = options;
     const currentTranslation =
-        translatable.translations.find(t => t.languageCode === languageCode) || defaultTranslation;
-    const index = translatable.translations.indexOf(currentTranslation);
+        findTranslation(translatable, languageCode) || defaultTranslation || ({} as any);
+    const index = translatable.translations?.indexOf(currentTranslation);
     const newTranslation = patchObject(currentTranslation, updatedFields);
     const newCustomFields: CustomFieldsObject = {};
     const newTranslatedCustomFields: CustomFieldsObject = {};
     if (customFieldConfig && updatedFields.hasOwnProperty('customFields')) {
         for (const field of customFieldConfig) {
             const value = updatedFields.customFields[field.name];
-            if (field.type === 'localeString') {
+            if (field.type === 'localeString' || field.type === 'localeText') {
                 newTranslatedCustomFields[field.name] = value;
             } else {
                 newCustomFields[field.name] =
-                    value === '' ? getDefaultValue(field.type as CustomFieldType) : value;
+                    value === ''
+                        ? getDefaultValue(field.type as CustomFieldType, field.nullable ?? true)
+                        : value;
             }
         }
         newTranslation.customFields = newTranslatedCustomFields;
     }
     const newTranslatable = {
         ...(patchObject(translatable, updatedFields) as any),
-        ...{ translations: translatable.translations.slice() },
+        ...{ translations: translatable.translations?.slice() ?? [] },
     };
     if (customFieldConfig) {
         newTranslatable.customFields = newCustomFields;
@@ -55,23 +59,6 @@ export function createUpdatedTranslatable<T extends { translations: any[] } & Ma
         newTranslatable.translations.push(newTranslation);
     }
     return newTranslatable;
-}
-
-function getDefaultValue(type: CustomFieldType): any {
-    switch (type) {
-        case 'localeString':
-        case 'string':
-            return '';
-        case 'boolean':
-            return false;
-        case 'float':
-        case 'int':
-            return 0;
-        case 'datetime':
-            return new Date();
-        default:
-            assertNever(type);
-    }
 }
 
 /**

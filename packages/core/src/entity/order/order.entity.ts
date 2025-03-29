@@ -1,14 +1,17 @@
 import {
-    Adjustment,
-    AdjustmentType,
     CurrencyCode,
+    Discount,
     OrderAddress,
     OrderTaxSummary,
+    OrderType,
+    TaxLine,
 } from '@vendure/common/lib/generated-types';
 import { DeepPartial, ID } from '@vendure/common/lib/shared-types';
-import { Column, Entity, JoinTable, ManyToMany, ManyToOne, OneToMany } from 'typeorm';
+import { summate } from '@vendure/common/lib/shared-utils';
+import { Column, Entity, Index, JoinTable, ManyToMany, ManyToOne, OneToMany } from 'typeorm';
 
 import { Calculated } from '../../common/calculated-decorator';
+import { InternalServerError } from '../../common/error/errors';
 import { ChannelAware } from '../../common/types/common-types';
 import { HasCustomFields } from '../../config/custom-field/custom-field-types';
 import { OrderState } from '../../service/helpers/order-state-machine/order-state';
@@ -17,11 +20,14 @@ import { Channel } from '../channel/channel.entity';
 import { CustomOrderFields } from '../custom-entity-fields';
 import { Customer } from '../customer/customer.entity';
 import { EntityId } from '../entity-id.decorator';
-import { OrderItem } from '../order-item/order-item.entity';
+import { Fulfillment } from '../fulfillment/fulfillment.entity';
+import { Money } from '../money.decorator';
 import { OrderLine } from '../order-line/order-line.entity';
+import { OrderModification } from '../order-modification/order-modification.entity';
 import { Payment } from '../payment/payment.entity';
 import { Promotion } from '../promotion/promotion.entity';
-import { ShippingMethod } from '../shipping-method/shipping-method.entity';
+import { ShippingLine } from '../shipping-line/shipping-line.entity';
+import { Surcharge } from '../surcharge/surcharge.entity';
 
 /**
  * @description
@@ -40,30 +46,85 @@ export class Order extends VendureEntity implements ChannelAware, HasCustomField
         super(input);
     }
 
-    @Column() code: string;
+    @Column('varchar', { default: OrderType.Regular })
+    type: OrderType;
+
+    @OneToMany(type => Order, sellerOrder => sellerOrder.aggregateOrder)
+    sellerOrders: Order[];
+
+    @Index()
+    @ManyToOne(type => Order, aggregateOrder => aggregateOrder.sellerOrders)
+    aggregateOrder?: Order;
+
+    @EntityId({ nullable: true })
+    aggregateOrderId?: ID;
+
+    /**
+     * @description
+     * A unique code for the Order, generated according to the
+     * {@link OrderCodeStrategy}. This should be used as an order reference
+     * for Customers, rather than the Order's id.
+     */
+    @Column()
+    @Index({ unique: true })
+    code: string;
 
     @Column('varchar') state: OrderState;
 
+    /**
+     * @description
+     * Whether the Order is considered "active", meaning that the
+     * Customer can still make changes to it and has not yet completed
+     * the checkout process.
+     * This is governed by the {@link OrderPlacedStrategy}.
+     */
     @Column({ default: true })
     active: boolean;
 
+    /**
+     * @description
+     * The date & time that the Order was placed, i.e. the Customer
+     * completed the checkout and the Order is no longer "active".
+     * This is governed by the {@link OrderPlacedStrategy}.
+     */
     @Column({ nullable: true })
     orderPlacedAt?: Date;
 
-    @ManyToOne(type => Customer)
+    @Index()
+    @ManyToOne(type => Customer, customer => customer.orders)
     customer?: Customer;
+
+    @EntityId({ nullable: true })
+    customerId?: ID;
 
     @OneToMany(type => OrderLine, line => line.order)
     lines: OrderLine[];
 
+    /**
+     * @description
+     * Surcharges are arbitrary modifications to the Order total which are neither
+     * ProductVariants nor discounts resulting from applied Promotions. For example,
+     * one-off discounts based on customer interaction, or surcharges based on payment
+     * methods.
+     */
+    @OneToMany(type => Surcharge, surcharge => surcharge.order)
+    surcharges: Surcharge[];
+
+    /**
+     * @description
+     * An array of all coupon codes applied to the Order.
+     */
     @Column('simple-array')
     couponCodes: string[];
 
-    @ManyToMany(type => Promotion)
+    /**
+     * @description
+     * Promotions applied to the order. Only gets populated after the payment process has completed,
+     * i.e. the Order is no longer active.
+     */
+    @ManyToMany(type => Promotion, promotion => promotion.orders)
     @JoinTable()
     promotions: Promotion[];
-
-    @Column('simple-json') pendingAdjustments: Adjustment[];
 
     @Column('simple-json') shippingAddress: OrderAddress;
 
@@ -72,29 +133,12 @@ export class Order extends VendureEntity implements ChannelAware, HasCustomField
     @OneToMany(type => Payment, payment => payment.order)
     payments: Payment[];
 
+    @ManyToMany(type => Fulfillment, fulfillment => fulfillment.orders)
+    @JoinTable()
+    fulfillments: Fulfillment[];
+
     @Column('varchar')
     currencyCode: CurrencyCode;
-
-    @Column() subTotalBeforeTax: number;
-
-    /**
-     * @description
-     * The subTotal is the total of the OrderLines, before order-level promotions
-     * and shipping has been applied.
-     */
-    @Column() subTotal: number;
-
-    @EntityId({ nullable: true })
-    shippingMethodId: ID | null;
-
-    @ManyToOne(type => ShippingMethod)
-    shippingMethod: ShippingMethod | null;
-
-    @Column({ default: 0 })
-    shipping: number;
-
-    @Column({ default: 0 })
-    shippingWithTax: number;
 
     @Column(type => CustomOrderFields)
     customFields: CustomOrderFields;
@@ -106,69 +150,209 @@ export class Order extends VendureEntity implements ChannelAware, HasCustomField
     @JoinTable()
     channels: Channel[];
 
-    @Calculated()
-    get totalBeforeTax(): number {
-        return this.subTotalBeforeTax + this.promotionAdjustmentsTotal + (this.shipping || 0);
+    @OneToMany(type => OrderModification, modification => modification.order)
+    modifications: OrderModification[];
+
+    /**
+     * @description
+     * The subTotal is the total of all OrderLines in the Order. This figure also includes any Order-level
+     * discounts which have been prorated (proportionally distributed) amongst the OrderItems.
+     * To get a total of all OrderLines which does not account for prorated discounts, use the
+     * sum of {@link OrderLine}'s `discountedLinePrice` values.
+     */
+    @Money()
+    subTotal: number;
+
+    /**
+     * @description
+     * Same as subTotal, but inclusive of tax.
+     */
+    @Money()
+    subTotalWithTax: number;
+
+    /**
+     * @description
+     * The shipping charges applied to this order.
+     */
+    @OneToMany(type => ShippingLine, shippingLine => shippingLine.order)
+    shippingLines: ShippingLine[];
+
+    /**
+     * @description
+     * The total of all the `shippingLines`.
+     */
+    @Money({ default: 0 })
+    shipping: number;
+
+    @Money({ default: 0 })
+    shippingWithTax: number;
+
+    @Calculated({ relations: ['lines', 'shippingLines'] })
+    get discounts(): Discount[] {
+        this.throwIfLinesNotJoined('discounts');
+        const groupedAdjustments = new Map<string, Discount>();
+        for (const line of this.lines ?? []) {
+            for (const discount of line.discounts) {
+                const adjustment = groupedAdjustments.get(discount.adjustmentSource);
+                if (adjustment) {
+                    adjustment.amount += discount.amount;
+                    adjustment.amountWithTax += discount.amountWithTax;
+                } else {
+                    groupedAdjustments.set(discount.adjustmentSource, { ...discount });
+                }
+            }
+        }
+        for (const shippingLine of this.shippingLines ?? []) {
+            for (const discount of shippingLine.discounts) {
+                const adjustment = groupedAdjustments.get(discount.adjustmentSource);
+                if (adjustment) {
+                    adjustment.amount += discount.amount;
+                    adjustment.amountWithTax += discount.amountWithTax;
+                } else {
+                    groupedAdjustments.set(discount.adjustmentSource, { ...discount });
+                }
+            }
+        }
+        return [...groupedAdjustments.values()];
     }
 
-    @Calculated()
+    /**
+     * @description
+     * Equal to `subTotal` plus `shipping`
+     */
+    @Calculated({
+        query: qb =>
+            qb
+                .leftJoin(
+                    qb1 => {
+                        return qb1
+                            .from(Order, 'order')
+                            .select('order.shipping + order.subTotal', 'total')
+                            .addSelect('order.id', 'oid');
+                    },
+                    't1',
+                    't1.oid = order.id',
+                )
+                .addSelect('t1.total', 'total'),
+        expression: 'total',
+    })
     get total(): number {
-        return this.subTotal + this.promotionAdjustmentsTotal + (this.shippingWithTax || 0);
+        return this.subTotal + (this.shipping || 0);
     }
 
-    @Calculated()
-    get adjustments(): Adjustment[] {
-        return this.pendingAdjustments || [];
+    /**
+     * @description
+     * The final payable amount. Equal to `subTotalWithTax` plus `shippingWithTax`.
+     */
+    @Calculated({
+        query: qb =>
+            qb
+                .leftJoin(
+                    qb1 => {
+                        return qb1
+                            .from(Order, 'order')
+                            .select('order.shippingWithTax + order.subTotalWithTax', 'twt')
+                            .addSelect('order.id', 'oid');
+                    },
+                    't1',
+                    't1.oid = order.id',
+                )
+                .addSelect('t1.twt', 'twt'),
+        expression: 'twt',
+    })
+    get totalWithTax(): number {
+        return this.subTotalWithTax + (this.shippingWithTax || 0);
     }
 
-    @Calculated()
+    @Calculated({
+        relations: ['lines'],
+        query: qb => {
+            qb.leftJoin(
+                qb1 => {
+                    return qb1
+                        .from(Order, 'order')
+                        .select('SUM(lines.quantity)', 'qty')
+                        .addSelect('order.id', 'oid')
+                        .leftJoin('order.lines', 'lines')
+                        .groupBy('order.id');
+                },
+                't1',
+                't1.oid = order.id',
+            ).addSelect('t1.qty', 'qty');
+        },
+        expression: 'qty',
+    })
     get totalQuantity(): number {
-        return (this.lines || []).reduce((total, line) => total + line.quantity, 0);
+        this.throwIfLinesNotJoined('totalQuantity');
+        return summate(this.lines, 'quantity');
     }
 
-    @Calculated()
+    /**
+     * @description
+     * A summary of the taxes being applied to this Order.
+     */
+    @Calculated({ relations: ['lines'] })
     get taxSummary(): OrderTaxSummary[] {
-        const taxRateMap = new Map<number, { base: number; tax: number }>();
-        for (const line of this.lines) {
-            const row = taxRateMap.get(line.taxRate);
-            if (row) {
-                row.tax += line.lineTax;
-                row.base += line.linePrice;
-            } else {
-                taxRateMap.set(line.taxRate, {
-                    tax: line.lineTax,
-                    base: line.linePrice,
-                });
+        this.throwIfLinesNotJoined('taxSummary');
+        const taxRateMap = new Map<
+            string,
+            { rate: number; base: number; tax: number; description: string }
+        >();
+        const taxId = (taxLine: TaxLine): string => `${taxLine.description}:${taxLine.taxRate}`;
+        const taxableLines = [
+            ...(this.lines ?? []),
+            ...(this.shippingLines ?? []),
+            ...(this.surcharges ?? []),
+        ];
+        for (const line of taxableLines) {
+            const taxRateTotal = summate(line.taxLines, 'taxRate');
+            for (const taxLine of line.taxLines) {
+                const id = taxId(taxLine);
+                const row = taxRateMap.get(id);
+                const proportionOfTotalRate = 0 < taxLine.taxRate ? taxLine.taxRate / taxRateTotal : 0;
+
+                const lineBase =
+                    line instanceof OrderLine
+                        ? line.proratedLinePrice
+                        : line instanceof Surcharge
+                          ? line.price
+                          : line.discountedPrice;
+                const lineWithTax =
+                    line instanceof OrderLine
+                        ? line.proratedLinePriceWithTax
+                        : line instanceof Surcharge
+                          ? line.priceWithTax
+                          : line.discountedPriceWithTax;
+                const amount = Math.round((lineWithTax - lineBase) * proportionOfTotalRate);
+                if (row) {
+                    row.tax += amount;
+                    row.base += lineBase;
+                } else {
+                    taxRateMap.set(id, {
+                        tax: amount,
+                        base: lineBase,
+                        description: taxLine.description,
+                        rate: taxLine.taxRate,
+                    });
+                }
             }
         }
         return Array.from(taxRateMap.entries()).map(([taxRate, row]) => ({
-            taxRate,
+            taxRate: row.rate,
+            description: row.description,
             taxBase: row.base,
             taxTotal: row.tax,
         }));
     }
 
-    get promotionAdjustmentsTotal(): number {
-        return this.adjustments
-            .filter(a => a.type === AdjustmentType.PROMOTION)
-            .reduce((total, a) => total + a.amount, 0);
-    }
+    private throwIfLinesNotJoined(propertyName: keyof Order) {
+        if (this.lines == null) {
+            const errorMessage = [
+                `The property "${propertyName}" on the Order entity requires the Order.lines relation to be joined.`,
+                "This can be done with the EntityHydratorService: `await entityHydratorService.hydrate(ctx, order, { relations: ['lines'] })`",
+            ];
 
-    /**
-     * Clears Adjustments of the given type. If no type
-     * is specified, then all adjustments are removed.
-     */
-    clearAdjustments(type?: AdjustmentType) {
-        if (!type) {
-            this.pendingAdjustments = [];
-        } else {
-            this.pendingAdjustments = this.pendingAdjustments.filter(a => a.type !== type);
+            throw new InternalServerError(errorMessage.join('\n'));
         }
-    }
-
-    getOrderItems(): OrderItem[] {
-        return this.lines.reduce((items, line) => {
-            return [...items, ...line.items];
-        }, [] as OrderItem[]);
     }
 }

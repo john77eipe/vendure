@@ -16,18 +16,22 @@ import {
     NATIVE_AUTH_STRATEGY_NAME,
 } from '../../config/auth/native-authentication-strategy';
 import { ConfigService } from '../../config/config.service';
+import { TransactionalConnection } from '../../connection/transactional-connection';
+import { ExternalAuthenticationMethod } from '../../entity/authentication-method/external-authentication-method.entity';
 import { AuthenticatedSession } from '../../entity/session/authenticated-session.entity';
 import { User } from '../../entity/user/user.entity';
 import { EventBus } from '../../event-bus/event-bus';
 import { AttemptedLoginEvent } from '../../event-bus/events/attempted-login-event';
 import { LoginEvent } from '../../event-bus/events/login-event';
 import { LogoutEvent } from '../../event-bus/events/logout-event';
-import { TransactionalConnection } from '../transaction/transactional-connection';
 
 import { SessionService } from './session.service';
 
 /**
- * The AuthService manages both authenticated and anonymous Sessions.
+ * @description
+ * Contains methods relating to {@link Session}, {@link AuthenticatedSession} & {@link AnonymousSession} entities.
+ *
+ * @docsCategory services
  */
 @Injectable()
 export class AuthService {
@@ -39,7 +43,8 @@ export class AuthService {
     ) {}
 
     /**
-     * Authenticates a user's credentials and if okay, creates a new session.
+     * @description
+     * Authenticates a user's credentials and if okay, creates a new {@link AuthenticatedSession}.
      */
     async authenticate(
         ctx: RequestContext,
@@ -47,7 +52,7 @@ export class AuthService {
         authenticationMethod: string,
         authenticationData: any,
     ): Promise<AuthenticatedSession | InvalidCredentialsError | NotVerifiedError> {
-        this.eventBus.publish(
+        await this.eventBus.publish(
             new AttemptedLoginEvent(
                 ctx,
                 authenticationMethod,
@@ -59,10 +64,10 @@ export class AuthService {
         const authenticationStrategy = this.getAuthenticationStrategy(apiType, authenticationMethod);
         const authenticateResult = await authenticationStrategy.authenticate(ctx, authenticationData);
         if (typeof authenticateResult === 'string') {
-            return new InvalidCredentialsError(authenticateResult);
+            return new InvalidCredentialsError({ authenticationError: authenticateResult });
         }
         if (!authenticateResult) {
-            return new InvalidCredentialsError('');
+            return new InvalidCredentialsError({ authenticationError: '' });
         }
         return this.createAuthenticatedSessionForUser(ctx, authenticateResult, authenticationStrategy.name);
     }
@@ -83,7 +88,10 @@ export class AuthService {
             user.roles = userWithRoles?.roles || [];
         }
 
-        if (this.configService.authOptions.requireVerification && !user.verified) {
+        const extAuths = (user.authenticationMethods ?? []).filter(
+            am => am instanceof ExternalAuthenticationMethod,
+        );
+        if (!extAuths.length && this.configService.authOptions.requireVerification && !user.verified) {
             return new NotVerifiedError();
         }
         if (ctx.session && ctx.session.activeOrderId) {
@@ -96,12 +104,14 @@ export class AuthService {
             user,
             authenticationStrategyName,
         );
-        this.eventBus.publish(new LoginEvent(ctx, user));
+        await this.eventBus.publish(new LoginEvent(ctx, user));
         return session;
     }
 
     /**
-     * Verify the provided password against the one we have for the given user.
+     * @description
+     * Verify the provided password against the one we have for the given user. Requires
+     * the {@link NativeAuthenticationStrategy} to be configured.
      */
     async verifyUserPassword(
         ctx: RequestContext,
@@ -114,12 +124,13 @@ export class AuthService {
         );
         const passwordMatches = await nativeAuthenticationStrategy.verifyUserPassword(ctx, userId, password);
         if (!passwordMatches) {
-            return new InvalidCredentialsError('');
+            return new InvalidCredentialsError({ authenticationError: '' });
         }
         return true;
     }
 
     /**
+     * @description
      * Deletes all sessions for the user associated with the given session token.
      */
     async destroyAuthenticatedSession(ctx: RequestContext, sessionToken: string): Promise<void> {
@@ -136,7 +147,7 @@ export class AuthService {
             if (typeof authenticationStrategy.onLogOut === 'function') {
                 await authenticationStrategy.onLogOut(ctx, session.user);
             }
-            this.eventBus.publish(new LogoutEvent(ctx));
+            await this.eventBus.publish(new LogoutEvent(ctx));
             return this.sessionService.deleteSessionsByUser(ctx, session.user);
         }
     }

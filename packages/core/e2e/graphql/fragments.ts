@@ -35,13 +35,18 @@ export const ASSET_FRAGMENT = gql`
 export const PRODUCT_VARIANT_FRAGMENT = gql`
     fragment ProductVariant on ProductVariant {
         id
+        createdAt
+        updatedAt
         enabled
         languageCode
         name
-        price
         currencyCode
-        priceIncludesTax
+        price
         priceWithTax
+        prices {
+            currencyCode
+            price
+        }
         stockOnHand
         trackInventory
         taxRateApplied {
@@ -58,6 +63,7 @@ export const PRODUCT_VARIANT_FRAGMENT = gql`
             id
             code
             languageCode
+            groupId
             name
         }
         facetValues {
@@ -79,6 +85,10 @@ export const PRODUCT_VARIANT_FRAGMENT = gql`
             id
             languageCode
             name
+        }
+        channels {
+            id
+            code
         }
     }
     ${ASSET_FRAGMENT}
@@ -186,6 +196,7 @@ export const COLLECTION_FRAGMENT = gql`
         children {
             id
             name
+            position
         }
     }
     ${ASSET_FRAGMENT}
@@ -230,7 +241,7 @@ export const FACET_WITH_VALUES_FRAGMENT = gql`
 `;
 
 export const COUNTRY_FRAGMENT = gql`
-    fragment Country on Country {
+    fragment Country on Region {
         id
         code
         name
@@ -314,8 +325,11 @@ export const ORDER_FRAGMENT = gql`
         createdAt
         updatedAt
         code
+        active
         state
         total
+        totalWithTax
+        totalQuantity
         currencyCode
         customer {
             id
@@ -325,16 +339,19 @@ export const ORDER_FRAGMENT = gql`
     }
 `;
 
-export const ORDER_ITEM_FRAGMENT = gql`
-    fragment OrderItem on OrderItem {
+export const PAYMENT_FRAGMENT = gql`
+    fragment Payment on Payment {
         id
-        cancelled
-        unitPrice
-        unitPriceIncludesTax
-        unitPriceWithTax
-        taxRate
-        fulfillment {
+        transactionId
+        amount
+        method
+        state
+        nextStates
+        metadata
+        refunds {
             id
+            total
+            reason
         }
     }
 `;
@@ -362,43 +379,62 @@ export const ORDER_WITH_LINES_FRAGMENT = gql`
                 name
                 sku
             }
+            taxLines {
+                description
+                taxRate
+            }
             unitPrice
             unitPriceWithTax
             quantity
-            items {
-                ...OrderItem
-            }
-            totalPrice
+            unitPrice
+            unitPriceWithTax
+            taxRate
+            linePriceWithTax
         }
-        adjustments {
-            ...Adjustment
+        surcharges {
+            id
+            description
+            sku
+            price
+            priceWithTax
         }
         subTotal
-        subTotalBeforeTax
-        totalBeforeTax
+        subTotalWithTax
+        total
+        totalWithTax
+        totalQuantity
         currencyCode
         shipping
-        shippingMethod {
-            id
-            code
-            description
+        shippingWithTax
+        shippingLines {
+            priceWithTax
+            shippingMethod {
+                id
+                code
+                name
+                description
+            }
         }
         shippingAddress {
             ...ShippingAddress
         }
         payments {
+            ...Payment
+        }
+        fulfillments {
             id
-            transactionId
-            amount
-            method
             state
-            metadata
+            method
+            trackingCode
+            lines {
+                orderLineId
+                quantity
+            }
         }
         total
     }
-    ${ADJUSTMENT_FRAGMENT}
     ${SHIPPING_ADDRESS_FRAGMENT}
-    ${ORDER_ITEM_FRAGMENT}
+    ${PAYMENT_FRAGMENT}
 `;
 
 export const PROMOTION_FRAGMENT = gql`
@@ -410,12 +446,21 @@ export const PROMOTION_FRAGMENT = gql`
         startsAt
         endsAt
         name
+        description
         enabled
+        perCustomerUsageLimit
+        usageLimit
         conditions {
             ...ConfigurableOperation
         }
         actions {
             ...ConfigurableOperation
+        }
+        translations {
+            id
+            languageCode
+            name
+            description
         }
     }
     ${CONFIGURABLE_FRAGMENT}
@@ -490,8 +535,9 @@ export const FULFILLMENT_FRAGMENT = gql`
         nextStates
         method
         trackingCode
-        orderItems {
-            id
+        lines {
+            orderLineId
+            quantity
         }
     }
 `;
@@ -502,6 +548,8 @@ export const CHANNEL_FRAGMENT = gql`
         code
         token
         currencyCode
+        availableCurrencyCodes
+        defaultCurrencyCode
         defaultLanguageCode
         defaultShippingZone {
             id
@@ -594,9 +642,17 @@ export const SHIPPING_METHOD_FRAGMENT = gql`
         description
         calculator {
             code
+            args {
+                name
+                value
+            }
         }
         checker {
             code
+            args {
+                name
+                value
+            }
         }
     }
 `;

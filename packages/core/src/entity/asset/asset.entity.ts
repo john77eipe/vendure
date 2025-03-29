@@ -1,11 +1,16 @@
 import { AssetType } from '@vendure/common/lib/generated-types';
 import { DeepPartial } from '@vendure/common/lib/shared-types';
-import { Column, Entity, JoinColumn, OneToMany, OneToOne } from 'typeorm';
+import { Column, Entity, JoinTable, ManyToMany, OneToMany } from 'typeorm';
 
-import { Address } from '../address/address.entity';
+import { ChannelAware, Taggable } from '../../common/types/common-types';
+import { HasCustomFields } from '../../config/custom-field/custom-field-types';
 import { VendureEntity } from '../base/base.entity';
-import { CustomCustomerFields } from '../custom-entity-fields';
-import { User } from '../user/user.entity';
+import { Channel } from '../channel/channel.entity';
+import { Collection } from '../collection/collection.entity';
+import { CustomAssetFields } from '../custom-entity-fields';
+import { Product } from '../product/product.entity';
+import { ProductVariant } from '../product-variant/product-variant.entity';
+import { Tag } from '../tag/tag.entity';
 
 /**
  * @description
@@ -15,7 +20,7 @@ import { User } from '../user/user.entity';
  * @docsCategory entities
  */
 @Entity()
-export class Asset extends VendureEntity {
+export class Asset extends VendureEntity implements Taggable, ChannelAware, HasCustomFields {
     constructor(input?: DeepPartial<Asset>) {
         super(input);
     }
@@ -38,4 +43,24 @@ export class Asset extends VendureEntity {
 
     @Column('simple-json', { nullable: true })
     focalPoint?: { x: number; y: number };
+
+    @ManyToMany(type => Tag)
+    @JoinTable()
+    tags: Tag[];
+
+    @ManyToMany(type => Channel)
+    @JoinTable()
+    channels: Channel[];
+
+    @OneToMany(type => Collection, collection => collection.featuredAsset)
+    featuredInCollections?: Collection[];
+
+    @OneToMany(type => ProductVariant, productVariant => productVariant.featuredAsset)
+    featuredInVariants?: ProductVariant[];
+
+    @OneToMany(type => Product, product => product.featuredAsset)
+    featuredInProducts?: Product[];
+
+    @Column(type => CustomAssetFields)
+    customFields: CustomAssetFields;
 }

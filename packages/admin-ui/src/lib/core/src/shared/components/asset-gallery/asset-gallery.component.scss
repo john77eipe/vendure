@@ -2,7 +2,10 @@
 
 :host {
     display: flex;
-    overflow: hidden;
+    flex-direction: column-reverse;
+    @media screen and (min-width: $breakpoint-medium) {
+        flex-direction: row;
+    }
 }
 
 .gallery {
@@ -10,16 +13,11 @@
     flex: 1;
     display: grid;
     grid-template-columns: repeat(auto-fill, 150px);
-    grid-template-rows: repeat(auto-fill, 180px);
     grid-gap: 10px 20px;
-    overflow-y: auto;
-    padding-left: 12px;
-    padding-top: 12px;
-    padding-bottom: 12px;
 
     .card:hover {
-        box-shadow: 0 0.125rem 0 0 $color-primary-500;
-        border: 1px solid $color-primary-500;
+        box-shadow: 0 0.125rem 0 0 var(--color-primary-500);
+        border: 1px solid var(--color-primary-500);
     }
 }
 
@@ -28,21 +26,23 @@
     position: relative;
 }
 
-.selected-checkbox {
-    opacity: 0;
+
+img.asset-thumb {
+    aspect-ratio: 1;
+}
+
+vdr-select-toggle {
     position: absolute;
-    color: $color-success-500;
-    background-color: white;
-    border-radius: 50%;
+    ::ng-deep .toggle {
+        box-shadow: 0px 5px 5px -4px rgba(0, 0, 0, 0.75);
+    }
     top: -12px;
     left: -12px;
-    box-shadow: 0px 5px 5px -4px rgba(0, 0, 0, 0.75);
-    transition: opacity 0.1s;
 }
 
 .card.selected {
-    box-shadow: 0 0.125rem 0 0 $color-primary-500;
-    border: 1px solid $color-primary-500;
+    box-shadow: 0 0.125rem 0 0 var(--color-primary-500);
+    border: 1px solid var(--color-primary-500);
 
     .selected-checkbox {
         opacity: 1;
@@ -50,18 +50,21 @@
 }
 
 .detail {
+    display: flex;
+    align-items: normal;
+    gap: 4px;
+    min-height: 24px;
     font-size: 12px;
     margin: 3px;
     overflow: hidden;
     white-space: nowrap;
     text-overflow: ellipsis;
-    vdr-entity-info {
-        height: 16px;
-    }
 }
 
 .info-bar {
-    width: 25%;
+    @media screen and (min-width: $breakpoint-medium) {
+        width: 25%;
+    }
     padding: 0 6px;
     overflow-y: auto;
 
@@ -80,7 +83,7 @@
         &.visible {
             opacity: 1;
             transform: perspective(500px) translateZ(-44px) translateY(0px);
-            background-color: $color-grey-100;
+            background-color: var(--color-component-bg-100);
             transition: transform 0.3s, color 0.3s;
         }
     }
@@ -97,9 +100,9 @@
             transition: opacity 0.3s, visibility 0s;
         }
         ul {
-            text-align: left;
+            text-align: start;
             list-style-type: none;
-            margin-left: 12px;
+            margin-inline-start: 12px;
             li {
                 font-size: 12px;
             }
@@ -108,7 +111,7 @@
 
     .placeholder {
         text-align: center;
-        color: $color-grey-300;
+        color: var(--color-grey-300);
     }
 
     .preview {

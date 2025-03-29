@@ -7,7 +7,7 @@ import {
     ConfigurableOperationDef,
     ConfigurableOperationDefOptions,
 } from '../../common/configurable-operation';
-import { Order } from '../../entity/order/order.entity';
+import { ShippingMethod, Order } from '../../entity';
 
 export interface ShippingCalculatorConfig<T extends ConfigArgs> extends ConfigurableOperationDefOptions<T> {
     calculate: CalculateShippingFn<T>;
@@ -20,17 +20,25 @@ export interface ShippingCalculatorConfig<T extends ConfigArgs> extends Configur
  * @example
  * ```ts
  * const flatRateCalculator = new ShippingCalculator({
- *     code: 'flat-rate-calculator',
- *     description: [{ languageCode: LanguageCode.en, value: 'Default Flat-Rate Shipping Calculator' }],
- *     args: {
- *         rate: { type: 'int', config: { inputType: 'money' } },
+ *   code: 'flat-rate-calculator',
+ *   description: [{ languageCode: LanguageCode.en, value: 'Default Flat-Rate Shipping Calculator' }],
+ *   args: {
+ *     rate: {
+ *       type: 'int',
+ *       ui: { component: 'currency-form-input' },
  *     },
- *     calculate: (order, args) => {
- *         return {
- *             price: args.rate,
- *             priceWithTax: args.rate * ((100 + args.taxRate) / 100),
- *         };
- *     },
+ *     taxRate: {
+         type: 'int',
+         ui: { component: 'number-form-input', suffix: '%' },
+       },
+ *   },
+ *   calculate: (ctx, order, args) => {
+ *     return {
+ *       price: args.rate,
+ *       taxRate: args.taxRate,
+ *       priceIncludesTax: ctx.channel.pricesIncludeTax,
+ *     };
+ *   },
  * });
  * ```
  *
@@ -51,8 +59,13 @@ export class ShippingCalculator<T extends ConfigArgs = ConfigArgs> extends Confi
      *
      * @internal
      */
-    calculate(ctx: RequestContext, order: Order, args: ConfigArg[]): CalculateShippingFnResult {
-        return this.calculateFn(ctx, order, this.argsArrayToHash(args));
+    calculate(
+        ctx: RequestContext,
+        order: Order,
+        args: ConfigArg[],
+        method: ShippingMethod,
+    ): CalculateShippingFnResult {
+        return this.calculateFn(ctx, order, this.argsArrayToHash(args), method);
     }
 }
 
@@ -65,14 +78,20 @@ export class ShippingCalculator<T extends ConfigArgs = ConfigArgs> extends Confi
  */
 export interface ShippingCalculationResult {
     /**
+     * @description
      * The shipping price without any taxes.
      */
     price: number;
     /**
      * @description
-     * The shipping price including taxes.
+     * Whether or not the given price already includes taxes.
      */
-    priceWithTax: number;
+    priceIncludesTax: boolean;
+    /**
+     * @description
+     * The tax rate applied to the shipping price.
+     */
+    taxRate: number;
     /**
      * @description
      * Arbitrary metadata may be returned from the calculation function. This can be used
@@ -101,4 +120,5 @@ export type CalculateShippingFn<T extends ConfigArgs> = (
     ctx: RequestContext,
     order: Order,
     args: ConfigArgValues<T>,
+    method: ShippingMethod,
 ) => CalculateShippingFnResult;

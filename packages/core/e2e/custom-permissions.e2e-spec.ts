@@ -1,6 +1,7 @@
 import { mergeConfig } from '@vendure/core';
 import gql from 'graphql-tag';
 import path from 'path';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { initialData } from '../../../e2e-common/e2e-initial-data';
 import { testConfig, TEST_SETUP_TIMEOUT_MS } from '../../../e2e-common/test-config';
@@ -13,17 +14,20 @@ import {
 } from './fixtures/test-plugins/with-custom-permissions';
 import {
     AdministratorFragment,
-    CreateAdministrator,
-    CreateRole,
+    CreateAdministratorMutation,
+    CreateAdministratorMutationVariables,
+    CreateRoleMutation,
+    CreateRoleMutationVariables,
     RoleFragment,
-    UpdateRole,
+    UpdateRoleMutation,
+    UpdateRoleMutationVariables,
 } from './graphql/generated-e2e-admin-types';
 import { CREATE_ADMINISTRATOR, CREATE_ROLE, UPDATE_ROLE } from './graphql/shared-definitions';
 import { assertThrowsWithMessage } from './utils/assert-throws-with-message';
 
 describe('Custom permissions', () => {
     const { server, adminClient } = createTestEnvironment(
-        mergeConfig(testConfig, {
+        mergeConfig(testConfig(), {
             plugins: [TestPluginWithCustomPermissions],
         }),
     );
@@ -40,7 +44,7 @@ describe('Custom permissions', () => {
         await adminClient.asSuperAdmin();
 
         // create a new role and Admin and sign in as that Admin
-        const { createRole } = await adminClient.query<CreateRole.Mutation, CreateRole.Variables>(
+        const { createRole } = await adminClient.query<CreateRoleMutation, CreateRoleMutationVariables>(
             CREATE_ROLE,
             {
                 input: {
@@ -53,8 +57,8 @@ describe('Custom permissions', () => {
         );
         testRole = createRole;
         const { createAdministrator } = await adminClient.query<
-            CreateAdministrator.Mutation,
-            CreateAdministrator.Variables
+            CreateAdministratorMutation,
+            CreateAdministratorMutationVariables
         >(CREATE_ADMINISTRATOR, {
             input: {
                 firstName: 'Test',
@@ -88,7 +92,7 @@ describe('Custom permissions', () => {
         });
 
         it('CRUD read permission', async () => {
-            // tslint:disable-next-line:no-shadowed-variable
+            // eslint-disable-next-line no-shadow,@typescript-eslint/no-shadow
             const { wishlist } = await adminClient.query(CRUD_READ);
             expect(wishlist).toBe(true);
         });
@@ -148,7 +152,7 @@ describe('Custom permissions', () => {
     describe('adding permissions enables access', () => {
         beforeAll(async () => {
             await adminClient.asSuperAdmin();
-            await adminClient.query<UpdateRole.Mutation, UpdateRole.Variables>(UPDATE_ROLE, {
+            await adminClient.query<UpdateRoleMutation, UpdateRoleMutationVariables>(UPDATE_ROLE, {
                 input: {
                     id: testRole.id,
                     permissions: [
@@ -175,7 +179,7 @@ describe('Custom permissions', () => {
         });
 
         it('CRUD read permission', async () => {
-            // tslint:disable-next-line:no-shadowed-variable
+            // eslint-disable-next-line no-shadow,@typescript-eslint/no-shadow
             const { wishlist } = await adminClient.query(CRUD_READ);
             expect(wishlist).toBe(true);
         });

@@ -1,13 +1,12 @@
-import { Injectable, OnApplicationBootstrap, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
-import { JobListOptions, JobQueue as GraphQlJobQueue } from '@vendure/common/lib/generated-types';
-import { ID, PaginatedList } from '@vendure/common/lib/shared-types';
+import { Injectable, OnModuleDestroy } from '@nestjs/common';
+import { JobQueue as GraphQlJobQueue } from '@vendure/common/lib/generated-types';
 
-import { ConfigService } from '../config/config.service';
-import { JobQueueStrategy } from '../config/job-queue/job-queue-strategy';
-import { Logger } from '../config/logger/vendure-logger';
-import { ProcessContext } from '../process-context/process-context';
+import { ConfigService, JobQueueStrategy, Logger } from '../config';
 
+import { loggerCtx } from './constants';
 import { Job } from './job';
+import { JobBuffer } from './job-buffer/job-buffer';
+import { JobBufferService } from './job-buffer/job-buffer.service';
 import { JobQueue } from './job-queue';
 import { CreateQueueOptions, JobData } from './types';
 
@@ -17,24 +16,18 @@ import { CreateQueueOptions, JobData } from './types';
  * existing jobs.
  *
  * @example
- * ```TypeScript
+ * ```ts
  * // A service which transcodes video files
  * class VideoTranscoderService {
  *
  *   private jobQueue: JobQueue<{ videoId: string; }>;
  *
- *   onModuleInit() {
+ *   async onModuleInit() {
  *     // The JobQueue is created on initialization
- *     this.jobQueue = this.jobQueueService.createQueue({
+ *     this.jobQueue = await this.jobQueueService.createQueue({
  *       name: 'transcode-video',
- *       concurrency: 5,
  *       process: async job => {
- *         try {
- *           const result = await this.transcodeVideo(job.data.videoId);
- *           job.complete(result);
- *         } catch (e) {
- *           job.fail(e);
- *         }
+ *         return await this.transcodeVideo(job.data.videoId);
  *       },
  *     });
  *   }
@@ -43,7 +36,7 @@ import { CreateQueueOptions, JobData } from './types';
  *     this.jobQueue.add({ videoId, })
  *   }
  *
- *   private transcodeVideo(videoId: string) {
+ *   private async transcodeVideo(videoId: string) {
  *     // e.g. call some external transcoding service
  *   }
  *
@@ -53,80 +46,112 @@ import { CreateQueueOptions, JobData } from './types';
  * @docsCategory JobQueue
  */
 @Injectable()
-export class JobQueueService implements OnApplicationBootstrap, OnModuleDestroy {
-    private cleanJobsTimer: NodeJS.Timeout;
+export class JobQueueService implements OnModuleDestroy {
     private queues: Array<JobQueue<any>> = [];
-    private hasInitialized = false;
+    private hasStarted = false;
 
     private get jobQueueStrategy(): JobQueueStrategy {
         return this.configService.jobQueueOptions.jobQueueStrategy;
     }
 
-    constructor(private configService: ConfigService, private processContext: ProcessContext) {}
-
-    /** @internal */
-    async onApplicationBootstrap() {
-        if (this.processContext.isServer) {
-            const { pollInterval } = this.configService.jobQueueOptions;
-            if (pollInterval < 100) {
-                Logger.warn(
-                    `jobQueueOptions.pollInterval is set to ${pollInterval}ms. It is not receommended to set this lower than 100ms`,
-                );
-            }
-            await new Promise(resolve => setTimeout(resolve, 1000));
-            this.hasInitialized = true;
-            for (const queue of this.queues) {
-                if (!queue.started) {
-                    queue.start();
-                }
-            }
-        }
-    }
+    constructor(private configService: ConfigService, private jobBufferService: JobBufferService) {}
 
     /** @internal */
     onModuleDestroy() {
-        return Promise.all(this.queues.map(q => q.destroy()));
+        this.hasStarted = false;
+        return Promise.all(this.queues.map(q => q.stop()));
     }
 
     /**
      * @description
      * Configures and creates a new {@link JobQueue} instance.
      */
-    createQueue<Data extends JobData<Data>>(options: CreateQueueOptions<Data>): JobQueue<Data> {
-        const { jobQueueStrategy, pollInterval } = this.configService.jobQueueOptions;
-        const queue = new JobQueue(options, jobQueueStrategy, pollInterval);
-        if (this.processContext.isServer && this.hasInitialized) {
-            queue.start();
+    async createQueue<Data extends JobData<Data>>(
+        options: CreateQueueOptions<Data>,
+    ): Promise<JobQueue<Data>> {
+        if (this.configService.jobQueueOptions.prefix) {
+            options = { ...options, name: `${this.configService.jobQueueOptions.prefix}${options.name}` };
+        }
+        const wrappedProcessFn = this.createWrappedProcessFn(options.process);
+        options = { ...options, process: wrappedProcessFn };
+        const queue = new JobQueue(options, this.jobQueueStrategy, this.jobBufferService);
+        if (this.hasStarted && this.shouldStartQueue(queue.name)) {
+            await queue.start();
         }
         this.queues.push(queue);
         return queue;
     }
 
-    /**
-     * @description
-     * Gets a job by id. The implementation is handled by the configured
-     * {@link JobQueueStrategy}.
-     */
-    getJob(id: ID): Promise<Job | undefined> {
-        return this.jobQueueStrategy.findOne(id);
+    async start(): Promise<void> {
+        this.hasStarted = true;
+        for (const queue of this.queues) {
+            if (!queue.started && this.shouldStartQueue(queue.name)) {
+                Logger.info(`Starting queue: ${queue.name}`, loggerCtx);
+                await queue.start();
+            }
+        }
     }
 
     /**
      * @description
-     * Gets jobs according to the supplied options. The implementation is handled by the configured
-     * {@link JobQueueStrategy}.
+     * Adds a {@link JobBuffer}, which will make it active and begin collecting
+     * jobs to buffer.
+     *
+     * @since 1.3.0
      */
-    getJobs(options?: JobListOptions): Promise<PaginatedList<Job>> {
-        return this.jobQueueStrategy.findMany(options);
+    addBuffer(buffer: JobBuffer<any>) {
+        this.jobBufferService.addBuffer(buffer);
     }
 
     /**
      * @description
-     * Gets jobs by ids. The implementation is handled by the configured
-     * {@link JobQueueStrategy}.
+     * Removes a {@link JobBuffer}, prevent it from collecting and buffering any
+     * subsequent jobs.
+     *
+     * @since 1.3.0
      */
-    getJobsById(ids: ID[]): Promise<Job[]> {
-        return this.jobQueueStrategy.findManyById(ids);
+    removeBuffer(buffer: JobBuffer<any>) {
+        this.jobBufferService.removeBuffer(buffer);
+    }
+
+    /**
+     * @description
+     * Returns an object containing the number of buffered jobs arranged by bufferId. This
+     * can be used to decide whether a particular buffer has any jobs to flush.
+     *
+     * Passing in JobBuffer instances _or_ ids limits the results to the specified JobBuffers.
+     * If no argument is passed, sizes will be returned for _all_ JobBuffers.
+     *
+     * @example
+     * ```ts
+     * const sizes = await this.jobQueueService.bufferSize('buffer-1', 'buffer-2');
+     *
+     * // sizes = { 'buffer-1': 12, 'buffer-2': 3 }
+     * ```
+     *
+     * @since 1.3.0
+     */
+    bufferSize(...forBuffers: Array<JobBuffer<any> | string>): Promise<{ [bufferId: string]: number }> {
+        return this.jobBufferService.bufferSize(forBuffers);
+    }
+
+    /**
+     * @description
+     * Flushes the specified buffers, which means that the buffer is cleared and the jobs get
+     * sent to the job queue for processing. Before sending the jobs to the job queue,
+     * they will be passed through each JobBuffer's `reduce()` method, which is can be used
+     * to optimize the amount of work to be done by e.g. de-duplicating identical jobs or
+     * aggregating data over the collected jobs.
+     *
+     * Passing in JobBuffer instances _or_ ids limits the action to the specified JobBuffers.
+     * If no argument is passed, _all_ JobBuffers will be flushed.
+     *
+     * Returns an array of all Jobs which were added to the job queue.
+     *
+     * @since 1.3.0
+     */
+    flush(...forBuffers: Array<JobBuffer<any> | string>): Promise<Job[]> {
+        return this.jobBufferService.flush(forBuffers);
     }
 
     /**
@@ -142,11 +167,34 @@ export class JobQueueService implements OnApplicationBootstrap, OnModuleDestroy 
     }
 
     /**
-     * @description
-     * Removes settled jobs (completed or failed). The implementation is handled by the configured
-     * {@link JobQueueStrategy}.
+     * We wrap the process function in order to catch any errors thrown and pass them to
+     * any configured ErrorHandlerStrategies.
      */
-    removeSettledJobs(queueNames: string[], olderThan?: Date) {
-        return this.jobQueueStrategy.removeSettledJobs(queueNames, olderThan);
+    private createWrappedProcessFn<Data extends JobData<Data>>(
+        processFn: (job: Job<Data>) => Promise<any>,
+    ): (job: Job<Data>) => Promise<any> {
+        const { errorHandlers } = this.configService.systemOptions;
+        return async (job: Job<Data>) => {
+            try {
+                return await processFn(job);
+            } catch (e) {
+                for (const handler of errorHandlers) {
+                    if (e instanceof Error) {
+                        void handler.handleWorkerError(e, { job });
+                    }
+                }
+                throw e;
+            }
+        };
+    }
+
+    private shouldStartQueue(queueName: string): boolean {
+        if (this.configService.jobQueueOptions.activeQueues.length > 0) {
+            if (!this.configService.jobQueueOptions.activeQueues.includes(queueName)) {
+                return false;
+            }
+        }
+
+        return true;
     }
 }

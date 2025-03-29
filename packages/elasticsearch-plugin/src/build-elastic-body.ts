@@ -1,8 +1,8 @@
 import { LanguageCode, LogicalOperator, PriceRange, SortOrder } from '@vendure/common/lib/generated-types';
-import { DeepRequired, ID } from '@vendure/core';
+import { DeepRequired, ID, UserInputError } from '@vendure/core';
 
 import { SearchConfig } from './options';
-import { ElasticSearchInput, SearchRequestBody } from './types';
+import { CustomScriptMapping, ElasticSearchInput, ElasticSearchSortInput, SearchRequestBody } from './types';
 
 /**
  * Given a SearchInput object, returns the corresponding Elasticsearch body.
@@ -26,6 +26,8 @@ export function buildElasticBody(
         sort,
         priceRangeWithTax,
         priceRange,
+        facetValueFilters,
+        inStock,
     } = input;
     const query: any = {
         bool: {},
@@ -39,6 +41,7 @@ export function buildElasticBody(
             {
                 multi_match: {
                     query: term,
+                    fuzziness: 'AUTO',
                     type: searchConfig.multiMatchType,
                     fields: [
                         `productName^${searchConfig.boostFields.productName}`,
@@ -59,6 +62,24 @@ export function buildElasticBody(
             },
         ]);
     }
+    if (facetValueFilters && facetValueFilters.length) {
+        ensureBoolFilterExists(query);
+        facetValueFilters.forEach(facetValueFilter => {
+            if (facetValueFilter.and && facetValueFilter.or && facetValueFilter.or.length) {
+                throw new UserInputError('error.facetfilterinput-invalid-input');
+            }
+
+            if (facetValueFilter.and) {
+                query.bool.filter.push({ term: { facetValueIds: facetValueFilter.and } });
+            }
+
+            if (facetValueFilter.or && facetValueFilter.or.length) {
+                query.bool.filter.push({
+                    bool: { ['should']: facetValueFilter.or.map(id => ({ term: { facetValueIds: id } })) },
+                });
+            }
+        });
+    }
     if (collectionId) {
         ensureBoolFilterExists(query);
         query.bool.filter.push({ term: { collectionIds: collectionId } });
@@ -73,16 +94,23 @@ export function buildElasticBody(
     }
     if (priceRange) {
         ensureBoolFilterExists(query);
-        query.bool.filter = query.bool.filter.concat(createPriceFilters(priceRange, false, !!groupByProduct));
+        query.bool.filter = query.bool.filter.concat(createPriceFilters(priceRange, false));
     }
     if (priceRangeWithTax) {
         ensureBoolFilterExists(query);
-        query.bool.filter = query.bool.filter.concat(
-            createPriceFilters(priceRangeWithTax, true, !!groupByProduct),
-        );
+        query.bool.filter = query.bool.filter.concat(createPriceFilters(priceRangeWithTax, true));
     }
 
-    const sortArray = [];
+    if (inStock !== undefined) {
+        ensureBoolFilterExists(query);
+        if (groupByProduct) {
+            query.bool.filter.push({ term: { productInStock: inStock } });
+        } else {
+            query.bool.filter.push({ term: { inStock } });
+        }
+    }
+
+    const sortArray: ElasticSearchSortInput = [];
     if (sort) {
         if (sort.name) {
             sortArray.push({
@@ -90,18 +118,35 @@ export function buildElasticBody(
             });
         }
         if (sort.price) {
-            const priceField = groupByProduct ? 'priceMin' : 'price';
+            const priceField = 'price';
             sortArray.push({ [priceField]: { order: sort.price === SortOrder.ASC ? 'asc' : 'desc' } });
         }
     }
-    return {
+    const scriptFields: any | undefined = createScriptFields(
+        searchConfig.scriptFields,
+        input,
+        groupByProduct,
+    );
+
+    const body: SearchRequestBody = {
         query: searchConfig.mapQuery
             ? searchConfig.mapQuery(query, input, searchConfig, channelId, enabledOnly)
             : query,
-        sort: sortArray,
+        sort: searchConfig.mapSort ? searchConfig.mapSort(sortArray, input) : sortArray,
         from: skip || 0,
         size: take || 10,
+        track_total_hits: searchConfig.totalItemsMaxSize,
+        ...(scriptFields !== undefined
+            ? {
+                  _source: true,
+                  script_fields: scriptFields,
+              }
+            : undefined),
     };
+    if (groupByProduct) {
+        body.collapse = { field: 'productId' };
+    }
+    return body;
 }
 
 function ensureBoolFilterExists(query: { bool: { filter?: any } }) {
@@ -110,35 +155,43 @@ function ensureBoolFilterExists(query: { bool: { filter?: any } }) {
     }
 }
 
-function createPriceFilters(range: PriceRange, withTax: boolean, groupByProduct: boolean): any[] {
-    const withTaxFix = withTax ? 'WithTax' : '';
-    if (groupByProduct) {
-        return [
-            {
-                range: {
-                    [`price${withTaxFix}Min`]: {
-                        gte: range.min,
-                    },
-                },
-            },
-            {
-                range: {
-                    [`price${withTaxFix}Max`]: {
-                        lte: range.max,
-                    },
-                },
-            },
-        ];
-    } else {
-        return [
-            {
-                range: {
-                    ['price' + withTaxFix]: {
-                        gte: range.min,
-                        lte: range.max,
-                    },
-                },
-            },
-        ];
+function createScriptFields(
+    scriptFields: { [fieldName: string]: CustomScriptMapping<[ElasticSearchInput]> },
+    input: ElasticSearchInput,
+    groupByProduct?: boolean,
+): any | undefined {
+    if (scriptFields) {
+        const fields = Object.keys(scriptFields);
+        if (fields.length) {
+            const result: any = {};
+            for (const name of fields) {
+                const scriptField = scriptFields[name];
+                if (scriptField.context === 'product' && groupByProduct === true) {
+                    result[name] = scriptField.scriptFn(input);
+                }
+                if (scriptField.context === 'variant' && groupByProduct === false) {
+                    result[name] = scriptField.scriptFn(input);
+                }
+                if (scriptField.context === 'both' || scriptField.context === undefined) {
+                    result[name] = scriptField.scriptFn(input);
+                }
+            }
+            return result;
+        }
     }
+    return undefined;
+}
+
+function createPriceFilters(range: PriceRange, withTax: boolean): any[] {
+    const withTaxFix = withTax ? 'WithTax' : '';
+    return [
+        {
+            range: {
+                ['price' + withTaxFix]: {
+                    gte: range.min,
+                    lte: range.max,
+                },
+            },
+        },
+    ];
 }

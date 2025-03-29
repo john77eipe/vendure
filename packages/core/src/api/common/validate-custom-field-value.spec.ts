@@ -1,8 +1,26 @@
 import { LanguageCode } from '@vendure/common/lib/generated-types';
+import { fail } from 'assert';
+import { describe, expect, it } from 'vitest';
+
+import { Injector } from '../../common/injector';
+import { RequestContext } from './request-context';
 
 import { validateCustomFieldValue } from './validate-custom-field-value';
 
 describe('validateCustomFieldValue()', () => {
+    const injector = new Injector({} as any);
+
+    async function assertThrowsError(validateFn: (() => Promise<void>) | (() => void), message: string) {
+        try {
+            await validateFn();
+            fail('Should have thrown');
+        } catch (e: any) {
+            expect(e.message).toBe(message);
+        }
+    }
+
+    const ctx = RequestContext.empty();
+
     describe('string & localeString', () => {
         const validate = (value: string) => () =>
             validateCustomFieldValue(
@@ -12,18 +30,20 @@ describe('validateCustomFieldValue()', () => {
                     pattern: '^[0-9]+',
                 },
                 value,
+                injector,
+                ctx,
             );
 
-        it('passes valid pattern', () => {
+        it('passes valid pattern', async () => {
             expect(validate('1')).not.toThrow();
             expect(validate('123')).not.toThrow();
             expect(validate('1foo')).not.toThrow();
         });
 
-        it('throws on invalid pattern', () => {
-            expect(validate('')).toThrowError('error.field-invalid-string-pattern');
-            expect(validate('foo')).toThrowError('error.field-invalid-string-pattern');
-            expect(validate(' 1foo')).toThrowError('error.field-invalid-string-pattern');
+        it('throws on invalid pattern', async () => {
+            await assertThrowsError(validate(''), 'error.field-invalid-string-pattern');
+            await assertThrowsError(validate('foo'), 'error.field-invalid-string-pattern');
+            await assertThrowsError(validate(' 1foo'), 'error.field-invalid-string-pattern');
         });
     });
 
@@ -36,17 +56,19 @@ describe('validateCustomFieldValue()', () => {
                     options: [{ value: 'small' }, { value: 'large' }],
                 },
                 value,
+                injector,
+                ctx,
             );
 
-        it('passes valid option', () => {
+        it('passes valid option', async () => {
             expect(validate('small')).not.toThrow();
             expect(validate('large')).not.toThrow();
         });
 
-        it('throws on invalid option', () => {
-            expect(validate('SMALL')).toThrowError('error.field-invalid-string-option');
-            expect(validate('')).toThrowError('error.field-invalid-string-option');
-            expect(validate('bad')).toThrowError('error.field-invalid-string-option');
+        it('throws on invalid option', async () => {
+            await assertThrowsError(validate('SMALL'), 'error.field-invalid-string-option');
+            await assertThrowsError(validate(''), 'error.field-invalid-string-option');
+            await assertThrowsError(validate('bad'), 'error.field-invalid-string-option');
         });
     });
 
@@ -60,18 +82,20 @@ describe('validateCustomFieldValue()', () => {
                     max: 10,
                 },
                 value,
+                injector,
+                ctx,
             );
 
-        it('passes valid range', () => {
+        it('passes valid range', async () => {
             expect(validate(5)).not.toThrow();
             expect(validate(7)).not.toThrow();
             expect(validate(10)).not.toThrow();
         });
 
-        it('throws on invalid range', () => {
-            expect(validate(4)).toThrowError('error.field-invalid-number-range-min');
-            expect(validate(11)).toThrowError('error.field-invalid-number-range-max');
-            expect(validate(-7)).toThrowError('error.field-invalid-number-range-min');
+        it('throws on invalid range', async () => {
+            await assertThrowsError(validate(4), 'error.field-invalid-number-range-min');
+            await assertThrowsError(validate(11), 'error.field-invalid-number-range-max');
+            await assertThrowsError(validate(-7), 'error.field-invalid-number-range-min');
         });
     });
 
@@ -85,19 +109,23 @@ describe('validateCustomFieldValue()', () => {
                     max: '2019-06-01T08:30',
                 },
                 value,
+                injector,
+                ctx,
             );
 
-        it('passes valid range', () => {
+        it('passes valid range', async () => {
             expect(validate('2019-01-01T08:30:00.000')).not.toThrow();
             expect(validate('2019-06-01T08:30:00.000')).not.toThrow();
             expect(validate('2019-04-12T14:15:51.200')).not.toThrow();
         });
 
-        it('throws on invalid range', () => {
-            expect(validate('2019-01-01T08:29:00.000')).toThrowError(
+        it('throws on invalid range', async () => {
+            await assertThrowsError(
+                validate('2019-01-01T08:29:00.000'),
                 'error.field-invalid-datetime-range-min',
             );
-            expect(validate('2019-06-01T08:30:00.100')).toThrowError(
+            await assertThrowsError(
+                validate('2019-06-01T08:30:00.100'),
                 'error.field-invalid-datetime-range-max',
             );
         });
@@ -116,9 +144,15 @@ describe('validateCustomFieldValue()', () => {
                     },
                 },
                 value,
+                injector,
+                ctx,
             );
-        const validate2 = (value: string, languageCode: LanguageCode) => () =>
-            validateCustomFieldValue(
+        const validate2 = (value: string, languageCode: LanguageCode) => () => {
+            const ctxWithLanguage = new RequestContext({
+                languageCode,
+                apiType: 'admin',
+            } as any);
+            return validateCustomFieldValue(
                 {
                     name: 'test',
                     type: 'string',
@@ -132,27 +166,90 @@ describe('validateCustomFieldValue()', () => {
                     },
                 },
                 value,
-                languageCode,
+                injector,
+                ctxWithLanguage,
             );
+        };
 
-        it('passes validate fn string', () => {
+        it('passes validate fn string', async () => {
             expect(validate1('valid')).not.toThrow();
         });
 
-        it('passes validate fn localized string', () => {
+        it('passes validate fn localized string', async () => {
             expect(validate2('valid', LanguageCode.de)).not.toThrow();
         });
 
-        it('fails validate fn string', () => {
-            expect(validate1('bad')).toThrowError('invalid');
+        it('fails validate fn string', async () => {
+            await assertThrowsError(validate1('bad'), 'invalid');
         });
 
-        it('fails validate fn localized string en', () => {
-            expect(validate2('bad', LanguageCode.en)).toThrowError('invalid');
+        it('fails validate fn localized string en', async () => {
+            await assertThrowsError(validate2('bad', LanguageCode.en), 'invalid');
         });
 
-        it('fails validate fn localized string de', () => {
-            expect(validate2('bad', LanguageCode.de)).toThrowError('ungültig');
+        it('fails validate fn localized string de', async () => {
+            await assertThrowsError(validate2('bad', LanguageCode.de), 'ungültig');
+        });
+    });
+
+    describe('list types', () => {
+        it('number list', async () => {
+            const validate = (value: number[]) => () =>
+                validateCustomFieldValue(
+                    {
+                        name: 'test',
+                        type: 'int',
+                        list: true,
+                        min: 0,
+                        max: 10,
+                    },
+                    value,
+                    injector,
+                    ctx,
+                );
+
+            expect(validate([1, 2, 6])).not.toThrow();
+            await assertThrowsError(validate([1, 15, 3]), 'error.field-invalid-number-range-max');
+        });
+
+        it('string list with options', async () => {
+            const validate = (value: string[]) => () =>
+                validateCustomFieldValue(
+                    {
+                        name: 'test',
+                        list: true,
+                        type: 'string',
+                        options: [{ value: 'small' }, { value: 'large' }],
+                    },
+                    value,
+                    injector,
+                    ctx,
+                );
+
+            expect(validate(['small', 'large'])).not.toThrow();
+            await assertThrowsError(validate(['small', 'huge']), 'error.field-invalid-string-option');
+        });
+
+        it('list with validate function', async () => {
+            const validate = (value: string[]) => () =>
+                validateCustomFieldValue(
+                    {
+                        name: 'test',
+                        type: 'string',
+                        list: true,
+                        validate: (v: string[]) => {
+                            if (!v.every(val => val === 'valid')) {
+                                return 'invalid';
+                            }
+                        },
+                    },
+                    value,
+                    injector,
+                    ctx,
+                );
+
+            expect(validate(['valid', 'valid'])).not.toThrow();
+            await assertThrowsError(validate(['bad input', 'valid']), 'invalid');
         });
     });
 });

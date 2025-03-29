@@ -8,6 +8,7 @@ export const defaultShippingEligibilityChecker = new ShippingEligibilityChecker(
     args: {
         orderMinimum: {
             type: 'int',
+            defaultValue: 0,
             ui: { component: 'currency-form-input' },
             label: [{ languageCode: LanguageCode.en, value: 'Minimum order value' }],
             description: [
@@ -19,6 +20,6 @@ export const defaultShippingEligibilityChecker = new ShippingEligibilityChecker(
         },
     },
     check: (ctx, order, args) => {
-        return order.total >= args.orderMinimum;
+        return order.subTotalWithTax >= args.orderMinimum;
     },
 });

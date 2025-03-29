@@ -18,12 +18,20 @@
             [ngClass]="'depth-' + depth"
             [class.active]="collection.id === activeCollectionId"
         >
+            <div>
+                <input
+                    type="checkbox"
+                    clrCheckbox
+                    [checked]="selectionManager.isSelected(collection)"
+                    (click)="selectionManager.toggleSelection(collection, $event)"
+                />
+            </div>
             <div class="name">
                 <button
                     class="icon-button folder-button"
                     [disabled]="expandAll"
                     *ngIf="collection.children?.length; else folderSpacer"
-                    (click)="collection.expanded = !collection.expanded"
+                    (click)="toggleExpanded(collection)"
                 >
                     <clr-icon shape="folder" *ngIf="!collection.expanded && !expandAll"></clr-icon>
                     <clr-icon shape="folder-open" *ngIf="collection.expanded || expandAll"></clr-icon>
@@ -47,18 +55,18 @@
                 <clr-icon shape="edit"></clr-icon>
                 {{ 'common.edit' | translate }}
             </a>
-            <div class="drag-handle" cdkDragHandle *vdrIfPermissions="'UpdateCatalog'">
+            <div class="drag-handle" cdkDragHandle *vdrIfPermissions="['UpdateCatalog', 'UpdateCollection']">
                 <clr-icon shape="drag-handle" size="24"></clr-icon>
             </div>
             <vdr-dropdown>
-                <button class="icon-button" vdrDropdownTrigger>
+                <button class="icon-button" vdrDropdownTrigger (click)="getMoveListItems(collection)">
                     <clr-icon shape="ellipsis-vertical"></clr-icon>
                 </button>
                 <vdr-dropdown-menu vdrPosition="bottom-right">
                     <a
                         class="dropdown-item"
                         [routerLink]="['./', 'create', { parentId: collection.id }]"
-                        *vdrIfPermissions="'CreateCatalog'"
+                        *vdrIfPermissions="['CreateCatalog', 'CreateCollection']"
                     >
                         <clr-icon shape="plus"></clr-icon>
                         {{ 'catalog.create-new-collection' | translate }}
@@ -88,12 +96,18 @@
                     <button
                         type="button"
                         vdrDropdownItem
-                        *ngFor="let item of getMoveListItems(collection)"
+                        *ngFor="let item of moveListItems"
                         (click)="move(collection, item.id)"
                         [disabled]="!(hasUpdatePermission$ | async)"
                     >
-                        <clr-icon shape="child-arrow"></clr-icon>
-                        {{ item.path }}
+                        <div class="move-to-item">
+                            <div class="move-icon">
+                                <clr-icon shape="child-arrow"></clr-icon>
+                            </div>
+                            <div class="path">
+                                {{ item.path }}
+                            </div>
+                        </div>
                     </button>
                     <div class="dropdown-divider"></div>
                     <button
@@ -113,6 +127,7 @@
             [expandAll]="expandAll"
             [collectionTree]="collection"
             [activeCollectionId]="activeCollectionId"
+            [selectionManager]="selectionManager"
         ></vdr-collection-tree-node>
     </div>
 </div>

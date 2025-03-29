@@ -12,7 +12,7 @@
             [order]="order"
         ></vdr-fulfillment-detail>
     </div>
-    <div class="card-footer">
+    <div class="card-footer" *ngIf="fulfillment?.nextStates.length">
         <ng-container *ngIf="nextSuggestedState() as suggestedState">
             <button class="btn btn-sm btn-primary" (click)="transitionState.emit(suggestedState)">
                 {{ 'order.set-fulfillment-state' | translate: { state: (suggestedState | stateI18nToken | translate) } }}
@@ -26,7 +26,6 @@
                 <ng-container *ngFor="let nextState of nextOtherStates()">
                     <button
                         type="button"
-                        class="btn"
                         vdrDropdownItem
                         (click)="transitionState.emit(nextState)"
                     >

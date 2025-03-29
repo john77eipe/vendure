@@ -4,11 +4,14 @@ import {
     DeletionResponse,
     MutationCreateChannelArgs,
     MutationDeleteChannelArgs,
+    MutationDeleteChannelsArgs,
     MutationUpdateChannelArgs,
     Permission,
     QueryChannelArgs,
+    QueryChannelsArgs,
     UpdateChannelResult,
 } from '@vendure/common/lib/generated-types';
+import { PaginatedList } from '@vendure/common/lib/shared-types';
 
 import { ErrorResultUnion, isGraphQlErrorResult } from '../../../common/error/error-result';
 import { Channel } from '../../../entity/channel/channel.entity';
@@ -24,13 +27,16 @@ export class ChannelResolver {
     constructor(private channelService: ChannelService, private roleService: RoleService) {}
 
     @Query()
-    @Allow(Permission.ReadSettings)
-    channels(@Ctx() ctx: RequestContext): Promise<Channel[]> {
-        return this.channelService.findAll(ctx);
+    @Allow(Permission.ReadSettings, Permission.ReadChannel)
+    async channels(
+        @Ctx() ctx: RequestContext,
+        @Args() args: QueryChannelsArgs,
+    ): Promise<PaginatedList<Channel>> {
+        return this.channelService.findAll(ctx, args.options || undefined);
     }
 
     @Query()
-    @Allow(Permission.ReadSettings)
+    @Allow(Permission.ReadSettings, Permission.ReadChannel)
     async channel(@Ctx() ctx: RequestContext, @Args() args: QueryChannelArgs): Promise<Channel | undefined> {
         return this.channelService.findOne(ctx, args.id);
     }
@@ -43,7 +49,7 @@ export class ChannelResolver {
 
     @Transaction()
     @Mutation()
-    @Allow(Permission.SuperAdmin)
+    @Allow(Permission.SuperAdmin, Permission.CreateChannel)
     async createChannel(
         @Ctx() ctx: RequestContext,
         @Args() args: MutationCreateChannelArgs,
@@ -52,8 +58,8 @@ export class ChannelResolver {
         if (isGraphQlErrorResult(result)) {
             return result;
         }
-        const superAdminRole = await this.roleService.getSuperAdminRole();
-        const customerRole = await this.roleService.getCustomerRole();
+        const superAdminRole = await this.roleService.getSuperAdminRole(ctx);
+        const customerRole = await this.roleService.getCustomerRole(ctx);
         await this.roleService.assignRoleToChannel(ctx, superAdminRole.id, result.id);
         await this.roleService.assignRoleToChannel(ctx, customerRole.id, result.id);
         return result;
@@ -61,7 +67,7 @@ export class ChannelResolver {
 
     @Transaction()
     @Mutation()
-    @Allow(Permission.SuperAdmin)
+    @Allow(Permission.SuperAdmin, Permission.UpdateChannel)
     async updateChannel(
         @Ctx() ctx: RequestContext,
         @Args() args: MutationUpdateChannelArgs,
@@ -75,11 +81,21 @@ export class ChannelResolver {
 
     @Transaction()
     @Mutation()
-    @Allow(Permission.SuperAdmin)
+    @Allow(Permission.SuperAdmin, Permission.DeleteChannel)
     async deleteChannel(
         @Ctx() ctx: RequestContext,
         @Args() args: MutationDeleteChannelArgs,
     ): Promise<DeletionResponse> {
         return this.channelService.delete(ctx, args.id);
+    }
+
+    @Transaction()
+    @Mutation()
+    @Allow(Permission.SuperAdmin, Permission.DeleteChannel)
+    async deleteChannels(
+        @Ctx() ctx: RequestContext,
+        @Args() args: MutationDeleteChannelsArgs,
+    ): Promise<DeletionResponse[]> {
+        return Promise.all(args.ids.map(id => this.channelService.delete(ctx, id)));
     }
 }

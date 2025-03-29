@@ -1,14 +1,17 @@
 import { ChangeDetectionStrategy, ChangeDetectorRef, Component, OnInit } from '@angular/core';
+import { UntypedFormControl } from '@angular/forms';
 import {
+    configurableDefinitionToInstance,
+    ConfigurableOperation,
+    ConfigurableOperationDefinition,
+    configurableOperationValueIsValid,
     DataService,
     Dialog,
     FulfillOrderInput,
     GlobalFlag,
-    OrderDetail,
     OrderDetailFragment,
+    toConfigurableOperationInput,
 } from '@vendure/admin-ui/core';
-import { Observable } from 'rxjs';
-import { map } from 'rxjs/operators';
 
 @Component({
     selector: 'vdr-fulfill-order-dialog',
@@ -17,11 +20,14 @@ import { map } from 'rxjs/operators';
     changeDetection: ChangeDetectionStrategy.OnPush,
 })
 export class FulfillOrderDialogComponent implements Dialog<FulfillOrderInput>, OnInit {
-    order: OrderDetailFragment;
     resolveWith: (result?: FulfillOrderInput) => void;
-    method = '';
-    trackingCode = '';
+    fulfillmentHandlerDef: ConfigurableOperationDefinition;
+    fulfillmentHandler: ConfigurableOperation;
+    fulfillmentHandlerControl = new UntypedFormControl();
     fulfillmentQuantities: { [lineId: string]: { fulfillCount: number; max: number } } = {};
+
+    // Provided by modalService.fromComponent() call
+    order: OrderDetailFragment;
 
     constructor(private dataService: DataService, private changeDetector: ChangeDetectorRef) {}
 
@@ -37,12 +43,21 @@ export class FulfillOrderDialogComponent implements Dialog<FulfillOrderInput>, O
             this.changeDetector.markForCheck();
         });
 
-        if (this.order.shippingMethod) {
-            this.method = this.order.shippingMethod.name;
-        }
+        this.dataService.shippingMethod
+            .getShippingMethodOperations()
+            .mapSingle(data => data.fulfillmentHandlers)
+            .subscribe(handlers => {
+                this.fulfillmentHandlerDef =
+                    handlers.find(
+                        h => h.code === this.order.shippingLines[0]?.shippingMethod?.fulfillmentHandlerCode,
+                    ) || handlers[0];
+                this.fulfillmentHandler = configurableDefinitionToInstance(this.fulfillmentHandlerDef);
+                this.fulfillmentHandlerControl.patchValue(this.fulfillmentHandler);
+                this.changeDetector.markForCheck();
+            });
     }
 
-    getFulfillableCount(line: OrderDetail.Lines, globalTrackInventory: boolean): number {
+    getFulfillableCount(line: OrderDetailFragment['lines'][number], globalTrackInventory: boolean): number {
         const { trackInventory, stockOnHand } = line.productVariant;
         const effectiveTracInventory =
             trackInventory === GlobalFlag.INHERIT ? globalTrackInventory : trackInventory === GlobalFlag.TRUE;
@@ -51,9 +66,31 @@ export class FulfillOrderDialogComponent implements Dialog<FulfillOrderInput>, O
         return effectiveTracInventory ? Math.min(unfulfilledCount, stockOnHand) : unfulfilledCount;
     }
 
-    getUnfulfilledCount(line: OrderDetail.Lines): number {
-        const fulfilled = line.items.reduce((sum, item) => sum + (item.fulfillment ? 1 : 0), 0);
+    getUnfulfilledCount(line: OrderDetailFragment['lines'][number]): number {
+        const fulfilled =
+            this.order.fulfillments
+                ?.filter(f => f.state !== 'Cancelled')
+                .map(f => f.lines)
+                .flat()
+                .filter(row => row.orderLineId === line.id)
+                .reduce((sum, row) => sum + row.quantity, 0) ?? 0;
         return line.quantity - fulfilled;
+    }
+
+    canSubmit(): boolean {
+        const totalCount = Object.values(this.fulfillmentQuantities).reduce(
+            (total, { fulfillCount }) => total + fulfillCount,
+            0,
+        );
+        const fulfillmentQuantityIsValid = Object.values(this.fulfillmentQuantities).every(
+            ({ fulfillCount, max }) => fulfillCount <= max,
+        );
+        const formIsValid =
+            configurableOperationValueIsValid(
+                this.fulfillmentHandlerDef,
+                this.fulfillmentHandlerControl.value,
+            ) && this.fulfillmentHandlerControl.valid;
+        return formIsValid && 0 < totalCount && fulfillmentQuantityIsValid;
     }
 
     select() {
@@ -63,8 +100,10 @@ export class FulfillOrderDialogComponent implements Dialog<FulfillOrderInput>, O
         }));
         this.resolveWith({
             lines,
-            trackingCode: this.trackingCode,
-            method: this.method,
+            handler: toConfigurableOperationInput(
+                this.fulfillmentHandler,
+                this.fulfillmentHandlerControl.value,
+            ),
         });
     }
 

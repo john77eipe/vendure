@@ -1,21 +1,16 @@
-import {
-    Component,
-    ContentChild,
-    ContentChildren,
-    QueryList,
-    TemplateRef,
-    Type,
-    ViewChild,
-    ViewChildren,
-} from '@angular/core';
-import { Observable, Subject } from 'rxjs';
+import { Component, OnInit, TemplateRef, Type } from '@angular/core';
+import { Subject } from 'rxjs';
 
-import { Dialog, ModalOptions } from '../../../providers/modal/modal.service';
+import {
+    LocalizationDirectionType,
+    LocalizationService,
+} from '../../../providers/localization/localization.service';
+import { Dialog, ModalOptions } from '../../../providers/modal/modal.types';
 
 import { DialogButtonsDirective } from './dialog-buttons.directive';
 
 /**
- * This component should only be instatiated dynamically by the ModalService. It should not be used
+ * This component should only be instantiated dynamically by the ModalService. It should not be used
  * directly in templates. See {@link ModalService.fromComponent} method for more detail.
  */
 @Component({
@@ -23,12 +18,23 @@ import { DialogButtonsDirective } from './dialog-buttons.directive';
     templateUrl: './modal-dialog.component.html',
     styleUrls: ['./modal-dialog.component.scss'],
 })
-export class ModalDialogComponent<T extends Dialog<any>> {
+export class ModalDialogComponent<T extends Dialog<any>> implements OnInit {
+    direction$: LocalizationDirectionType;
+
     childComponentType: Type<T>;
     closeModal: (result?: any) => void;
     titleTemplateRef$ = new Subject<TemplateRef<any>>();
     buttonsTemplateRef$ = new Subject<TemplateRef<any>>();
     options?: ModalOptions<T>;
+
+    /**
+     *
+     */
+    constructor(private localizationService: LocalizationService) {}
+
+    ngOnInit(): void {
+        this.direction$ = this.localizationService.direction$;
+    }
 
     /**
      * This callback is invoked when the childComponentType is instantiated in the
@@ -41,7 +47,7 @@ export class ModalDialogComponent<T extends Dialog<any>> {
             this.closeModal(result);
         };
         if (this.options && this.options.locals) {
-            // tslint:disable-next-line
+            // eslint-disable-next-line
             for (const key in this.options.locals) {
                 componentInstance[key] = this.options.locals[key] as T[Extract<keyof T, string>];
             }

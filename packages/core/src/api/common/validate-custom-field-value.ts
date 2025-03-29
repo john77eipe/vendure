@@ -1,7 +1,7 @@
-import { LanguageCode } from '@vendure/common/lib/generated-types';
 import { assertNever } from '@vendure/common/lib/shared-utils';
 
 import { UserInputError } from '../../common/error/errors';
+import { Injector } from '../../common/injector';
 import {
     CustomFieldConfig,
     DateTimeCustomFieldConfig,
@@ -9,18 +9,26 @@ import {
     IntCustomFieldConfig,
     LocaleStringCustomFieldConfig,
     StringCustomFieldConfig,
+    StringStructFieldConfig,
+    StructCustomFieldConfig,
+    StructFieldConfig,
     TypedCustomFieldConfig,
+    TypedStructFieldConfig,
 } from '../../config/custom-field/custom-field-types';
+
+import { RequestContext } from './request-context';
+import { userHasPermissionsOnCustomField } from './user-has-permissions-on-custom-field';
 
 /**
  * Validates the value of a custom field input against any configured constraints.
  * If validation fails, an error is thrown.
  */
-export function validateCustomFieldValue(
+export async function validateCustomFieldValue(
     config: CustomFieldConfig,
-    value: any,
-    languageCode?: LanguageCode,
-): void {
+    value: any | any[],
+    injector: Injector,
+    ctx: RequestContext,
+): Promise<void> {
     if (config.readonly) {
         throw new UserInputError('error.field-invalid-readonly', { name: config.name });
     }
@@ -31,6 +39,28 @@ export function validateCustomFieldValue(
             });
         }
     }
+    if (config.requiresPermission) {
+        if (!userHasPermissionsOnCustomField(ctx, config)) {
+            throw new UserInputError('error.field-invalid-no-permission', { name: config.name });
+        }
+    }
+    if (config.list === true && Array.isArray(value)) {
+        for (const singleValue of value) {
+            validateSingleValue(config, singleValue);
+            if (config.type === 'struct') {
+                await validateStructField(config, singleValue, injector, ctx);
+            }
+        }
+    } else {
+        validateSingleValue(config, value);
+        if (config.type === 'struct') {
+            await validateStructField(config, value, injector, ctx);
+        }
+    }
+    await validateCustomFunction(config as TypedCustomFieldConfig<any, any>, value, injector, ctx);
+}
+
+function validateSingleValue(config: CustomFieldConfig | StructFieldConfig, value: any) {
     switch (config.type) {
         case 'string':
         case 'localeString':
@@ -44,32 +74,59 @@ export function validateCustomFieldValue(
             validateDateTimeField(config, value);
             break;
         case 'boolean':
+        case 'relation':
+        case 'text':
+        case 'localeText':
+            break;
+        // Structs get validated separately
+        case 'struct':
             break;
         default:
             assertNever(config);
     }
-    validateCustomFunction(config as TypedCustomFieldConfig<any, any>, value, languageCode);
 }
 
-function validateCustomFunction<T extends TypedCustomFieldConfig<any, any>>(
-    config: T,
+async function validateStructField(
+    config: StructCustomFieldConfig,
     value: any,
-    languageCode?: LanguageCode,
+    injector: Injector,
+    ctx: RequestContext,
 ) {
+    for (const field of config.fields ?? []) {
+        const fieldValue = value[field.name];
+        if (fieldValue !== undefined) {
+            validateSingleValue(field, fieldValue);
+        }
+        if (typeof field.validate === 'function') {
+            const error = await (field.validate as any)(fieldValue, injector, ctx);
+            if (typeof error === 'string') {
+                throw new UserInputError(error);
+            }
+            if (Array.isArray(error)) {
+                const localizedError = error.find(e => e.languageCode === ctx.languageCode) || error[0];
+                throw new UserInputError(localizedError.value);
+            }
+        }
+    }
+}
+
+async function validateCustomFunction<
+    T extends TypedCustomFieldConfig<any, any> | TypedStructFieldConfig<any, any>,
+>(config: T, value: any, injector: Injector, ctx: RequestContext) {
     if (typeof config.validate === 'function') {
-        const error = config.validate(value);
+        const error = await config.validate(value, injector, ctx);
         if (typeof error === 'string') {
             throw new UserInputError(error);
         }
         if (Array.isArray(error)) {
-            const localizedError = error.find(e => e.languageCode === languageCode) || error[0];
+            const localizedError = error.find(e => e.languageCode === ctx.languageCode) || error[0];
             throw new UserInputError(localizedError.value);
         }
     }
 }
 
 function validateStringField(
-    config: StringCustomFieldConfig | LocaleStringCustomFieldConfig,
+    config: StringCustomFieldConfig | LocaleStringCustomFieldConfig | StringStructFieldConfig,
     value: string,
 ): void {
     const { pattern } = config;
@@ -86,6 +143,9 @@ function validateStringField(
     const options = (config as StringCustomFieldConfig).options;
     if (options) {
         const validOptions = options.map(o => o.value);
+        if (value === null && (config as StringCustomFieldConfig).nullable === true) {
+            return;
+        }
         if (!validOptions.includes(value)) {
             throw new UserInputError('error.field-invalid-string-option', {
                 name: config.name,

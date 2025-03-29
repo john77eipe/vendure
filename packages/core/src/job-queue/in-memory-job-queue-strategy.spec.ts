@@ -1,5 +1,6 @@
-/* tslint:disable:no-non-null-assertion */
+/* eslint-disable @typescript-eslint/no-non-null-assertion */
 import { JobListOptions, SortOrder } from '@vendure/common/lib/generated-types';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { InMemoryJobQueueStrategy } from './in-memory-job-queue-strategy';
 import { Job } from './job';
@@ -8,11 +9,21 @@ describe('InMemoryJobQueueStrategy', () => {
     let strategy: InMemoryJobQueueStrategy;
     beforeEach(() => {
         strategy = new InMemoryJobQueueStrategy();
+        // init with mock injector & ProcessContext
+        strategy.init({
+            get() {
+                return { isWorker: false };
+            },
+        } as any);
+    });
+
+    afterEach(async () => {
+        strategy.destroy();
     });
 
     describe('findMany options', () => {
-        beforeEach(() => {
-            strategy.add(
+        beforeEach(async () => {
+            await strategy.add(
                 new Job({
                     id: 'video-1',
                     queueName: 'video',
@@ -20,7 +31,7 @@ describe('InMemoryJobQueueStrategy', () => {
                     createdAt: new Date('2020-04-03T10:00:00.000Z'),
                 }),
             );
-            strategy.add(
+            await strategy.add(
                 new Job({
                     id: 'video-2',
                     queueName: 'video',
@@ -28,7 +39,7 @@ describe('InMemoryJobQueueStrategy', () => {
                     createdAt: new Date('2020-04-03T10:01:00.000Z'),
                 }),
             );
-            strategy.add(
+            await strategy.add(
                 new Job({
                     id: 'email-1',
                     queueName: 'email',
@@ -36,7 +47,7 @@ describe('InMemoryJobQueueStrategy', () => {
                     createdAt: new Date('2020-04-03T10:02:00.000Z'),
                 }),
             );
-            strategy.add(
+            await strategy.add(
                 new Job({
                     id: 'video-3',
                     queueName: 'video',
@@ -44,7 +55,7 @@ describe('InMemoryJobQueueStrategy', () => {
                     createdAt: new Date('2020-04-03T10:03:00.000Z'),
                 }),
             );
-            strategy.add(
+            await strategy.add(
                 new Job({
                     id: 'email-2',
                     queueName: 'email',
@@ -56,7 +67,7 @@ describe('InMemoryJobQueueStrategy', () => {
 
         async function getIdResultsFor(options: JobListOptions): Promise<string[]> {
             const result = await strategy.findMany(options);
-            return result.items.map((j) => j.id as string);
+            return result.items.map(j => j.id as string);
         }
 
         it('take & skip', async () => {

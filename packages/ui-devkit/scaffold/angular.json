@@ -17,41 +17,67 @@
         "build": {
           "builder": "@angular-devkit/build-angular:browser",
           "options": {
-            "aot": true,
-            "baseHref": "/admin/",
+            "baseHref": "/",
             "outputPath": "dist",
             "index": "src/index.html",
             "main": "src/main.ts",
             "polyfills": "src/polyfills.ts",
             "tsConfig": "src/tsconfig.app.json",
             "assets": [
+              {
+                "glob": "**/*.*",
+                "input": "static-assets",
+                "output": "assets"
+              },
               "src/favicon.ico",
+              {
+                "glob": "favicon.ico",
+                "input": "static-assets",
+                "output": "/"
+              },
               "src/vendure-ui-config.json",
               "src/theme.min.css",
               "src/assets",
               "src/i18n-messages",
               {
-                "glob": "**/*.*",
+                "glob": "logo-*.*",
                 "input": "static-assets",
                 "output": "assets"
               }
             ],
             "styles": [
-              "src/styles/styles.scss"
+              "src/global-styles.scss"
             ],
             "stylePreprocessorOptions": {
               "includePaths": [
-                "./src/styles"
+                "./src/styles",
+                "./src/fonts"
               ]
             },
-            "showCircularDependencies": false,
             "allowedCommonJsDependencies": [
               "graphql-tag",
               "zen-observable",
               "lodash",
+              "dayjs",
               "apollo-upload-client",
-              "@vendure/common/lib/simple-deep-clone"
-            ]
+              "@clr/icons",
+              "@clr/icons/shapes/all-shapes",
+              "@vendure/common/lib/generated-types",
+              "@vendure/common/lib/simple-deep-clone",
+              "@vendure/common/lib/shared-constants",
+              "@vendure/common/lib/shared-utils",
+              "@vendure/common/lib/normalize-string",
+              "@vendure/common/lib/unique",
+              "@vendure/common/lib/omit",
+              "@vendure/common/lib/pick",
+              "@messageformat/core"
+            ],
+            "vendorChunk": true,
+            "extractLicenses": false,
+            "buildOptimizer": false,
+            "sourceMap": true,
+            "optimization": false,
+            "namedChunks": true
           },
           "configurations": {
             "production": {
@@ -67,17 +93,18 @@
                   "with": "src/environment.prod.ts"
                 }
               ],
-              "optimization": true,
+              "optimization": {
+                "styles": {
+                  "inlineCritical": false
+                }
+              },
               "outputHashing": "all",
-              "sourceMap": true,
-              "extractCss": true,
               "namedChunks": false,
-              "aot": true,
               "extractLicenses": true,
-              "vendorChunk": false,
-              "buildOptimizer": false
+              "vendorChunk": false
             }
-          }
+          },
+          "defaultConfiguration": ""
         },
         "serve": {
           "builder": "@angular-devkit/build-angular:dev-server",
@@ -88,7 +115,6 @@
       }
     }
   },
-  "defaultProject": "vendure-admin",
   "schematics": {
     "@schematics/angular:component": {
       "skipTests": true,

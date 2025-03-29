@@ -1,9 +1,12 @@
 @import "variables";
+@import "../order-table/order-table-mixin";
+
 
 :host {
     height: 100%;
     display: flex;
     min-height: 64vh;
+    @include order-table;
 }
 .fulfillment-wrapper {
     flex: 1;
@@ -16,14 +19,14 @@
         margin-top: 24px;
         @media screen and (min-width: $breakpoint-small) {
             margin-top: 0;
-            margin-left: 24px;
+            margin-inline-start: 24px;
             width: 250px;
         }
         clr-input-container {
             margin-top: 24px;
         }
     }
-    .order-lines {
+    .order-table {
         flex: 1;
         overflow-y: auto;
         table {
@@ -31,6 +34,6 @@
         }
     }
     tr.ignore {
-        color: $color-grey-300;
+        color: var(--color-grey-300);
     }
 }

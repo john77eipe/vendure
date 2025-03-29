@@ -1,4 +1,8 @@
-import { DEFAULT_AUTH_TOKEN_HEADER_KEY } from '@vendure/common/lib/shared-constants';
+import { MiddlewareConsumer, NestModule } from '@nestjs/common';
+import {
+    DEFAULT_AUTH_TOKEN_HEADER_KEY,
+    DEFAULT_CHANNEL_TOKEN_KEY,
+} from '@vendure/common/lib/shared-constants';
 import {
     AdminUiAppConfig,
     AdminUiAppDevModeConfig,
@@ -8,31 +12,49 @@ import {
 import {
     ConfigService,
     createProxyHandler,
-    LanguageCode,
     Logger,
-    OnVendureBootstrap,
-    OnVendureClose,
     PluginCommonModule,
-    RuntimeVendureConfig,
+    ProcessContext,
+    registerPluginStartupMessage,
     VendurePlugin,
 } from '@vendure/core';
 import express from 'express';
+import { rateLimit } from 'express-rate-limit';
 import fs from 'fs-extra';
-import { Server } from 'http';
 import path from 'path';
 
-import { DEFAULT_APP_PATH, defaultAvailableLanguages, defaultLanguage, loggerCtx } from './constants';
+import { adminApiExtensions } from './api/api-extensions';
+import { MetricsResolver } from './api/metrics.resolver';
+import {
+    defaultAvailableLanguages,
+    defaultLanguage,
+    defaultLocale,
+    DEFAULT_APP_PATH,
+    loggerCtx,
+    defaultAvailableLocales,
+} from './constants';
+import { MetricsService } from './service/metrics.service';
 
 /**
  * @description
  * Configuration options for the {@link AdminUiPlugin}.
  *
- * @docsCategory AdminUiPlugin
+ * @docsCategory core plugins/AdminUiPlugin
  */
 export interface AdminUiPluginOptions {
     /**
      * @description
-     * The port on which the server will listen. If not
+     * The route to the Admin UI.
+     *
+     * Note: If you are using the `compileUiExtensions` function to compile a custom version of the Admin UI, then
+     * the route should match the `baseHref` option passed to that function. The default value of `baseHref` is `/admin/`,
+     * so it only needs to be changed if you set this `route` option to something other than `"admin"`.
+     */
+    route: string;
+    /**
+     * @description
+     * The port on which the server will listen. This port will be proxied by the AdminUiPlugin to the same port that
+     * the Vendure server is running on.
      */
     port: number;
     /**
@@ -49,26 +71,6 @@ export interface AdminUiPluginOptions {
      * version, e.g. one pre-compiled with one or more ui extensions.
      */
     app?: AdminUiAppConfig | AdminUiAppDevModeConfig;
-    /**
-     * @description
-     * The hostname of the Vendure server which the admin ui will be making API calls
-     * to. If set to "auto", the admin ui app will determine the hostname from the
-     * current location (i.e. `window.location.hostname`).
-     *
-     * @deprecated Use the adminUiConfig property instead
-     * @default 'auto'
-     */
-    apiHost?: string | 'auto';
-    /**
-     * @description
-     * The port of the Vendure server which the admin ui will be making API calls
-     * to. If set to "auto", the admin ui app will determine the port from the
-     * current location (i.e. `window.location.port`).
-     *
-     * @deprecated Use the adminUiConfig property instead
-     * @default 'auto'
-     */
-    apiPort?: number | 'auto';
     /**
      * @description
      * Allows the contents of the `vendure-ui-config.json` file to be set, e.g.
@@ -104,18 +106,43 @@ export interface AdminUiPluginOptions {
  * };
  * ```
  *
- * @docsCategory AdminUiPlugin
+ * ## Metrics
+ *
+ * This plugin also defines a `metricSummary` query which is used by the Admin UI to display the order metrics on the dashboard.
+ *
+ * If you are building a stand-alone version of the Admin UI app, and therefore don't need this plugin to server the Admin UI,
+ * you can still use the `metricSummary` query by adding the `AdminUiPlugin` to the `plugins` array, but without calling the `init()` method:
+ *
+ * @example
+ * ```ts
+ * import { AdminUiPlugin } from '\@vendure/admin-ui-plugin';
+ *
+ * const config: VendureConfig = {
+ *   plugins: [
+ *     AdminUiPlugin, // <-- no call to .init()
+ *   ],
+ *   // ...
+ * };
+ * ```
+ *
+ * @docsCategory core plugins/AdminUiPlugin
  */
 @VendurePlugin({
     imports: [PluginCommonModule],
-    providers: [],
-    configuration: config => AdminUiPlugin.configure(config),
+    adminApiExtensions: {
+        schema: adminApiExtensions,
+        resolvers: [MetricsResolver],
+    },
+    providers: [MetricsService],
+    compatibility: '^3.0.0',
 })
-export class AdminUiPlugin implements OnVendureBootstrap, OnVendureClose {
-    private static options: AdminUiPluginOptions;
-    private server: Server;
+export class AdminUiPlugin implements NestModule {
+    private static options: AdminUiPluginOptions | undefined;
 
-    constructor(private configService: ConfigService) {}
+    constructor(
+        private configService: ConfigService,
+        private processContext: ProcessContext,
+    ) {}
 
     /**
      * @description
@@ -126,108 +153,113 @@ export class AdminUiPlugin implements OnVendureBootstrap, OnVendureClose {
         return AdminUiPlugin;
     }
 
-    /** @internal */
-    static async configure(config: RuntimeVendureConfig): Promise<RuntimeVendureConfig> {
-        const route = 'admin';
-        const { app } = this.options;
-        const appWatchMode = this.isDevModeApp(app);
-        let port: number;
-        if (this.isDevModeApp(app)) {
-            port = app.port;
-        } else {
-            port = this.options.port;
+    async configure(consumer: MiddlewareConsumer) {
+        if (this.processContext.isWorker) {
+            return;
         }
-        config.apiOptions.middleware.push({
-            handler: createProxyHandler({
-                hostname: this.options.hostname,
-                port,
-                route: 'admin',
-                label: 'Admin UI',
-                basePath: appWatchMode ? 'admin' : undefined,
-            }),
-            route,
-        });
-        if (this.isDevModeApp(app)) {
-            config.apiOptions.middleware.push({
-                handler: createProxyHandler({
-                    hostname: this.options.hostname,
-                    port,
-                    route: 'sockjs-node',
-                    label: 'Admin UI live reload',
-                    basePath: 'sockjs-node',
-                }),
-                route: 'sockjs-node',
-            });
-        }
-        return config;
-    }
-
-    /** @internal */
-    async onVendureBootstrap() {
-        const { apiHost, apiPort, port, app, adminUiConfig } = AdminUiPlugin.options;
-        // TODO: Remove in next minor version (0.11.0)
-        if (apiHost || apiPort) {
-            Logger.warn(
-                `The "apiHost" and "apiPort" options are deprecated and will be removed in a future version.`,
+        if (!AdminUiPlugin.options) {
+            Logger.info(
+                `AdminUiPlugin's init() method was not called. The Admin UI will not be served.`,
                 loggerCtx,
             );
-            Logger.warn(
-                `Use the "adminUiConfig.apiHost", "adminUiConfig.apiPort" properties instead.`,
-                loggerCtx,
-            );
+            return;
         }
+        const { app, hostname, route, adminUiConfig } = AdminUiPlugin.options;
         const adminUiAppPath = AdminUiPlugin.isDevModeApp(app)
             ? path.join(app.sourcePath, 'src')
             : (app && app.path) || DEFAULT_APP_PATH;
         const adminUiConfigPath = path.join(adminUiAppPath, 'vendure-ui-config.json');
+        const indexHtmlPath = path.join(adminUiAppPath, 'index.html');
 
-        const overwriteConfig = () => {
+        const overwriteConfig = async () => {
             const uiConfig = this.getAdminUiConfig(adminUiConfig);
-            return this.overwriteAdminUiConfig(adminUiConfigPath, uiConfig);
+            await this.overwriteAdminUiConfig(adminUiConfigPath, uiConfig);
+            await this.overwriteBaseHref(indexHtmlPath, route);
         };
 
-        if (!AdminUiPlugin.isDevModeApp(app)) {
-            // If not in dev mode, start a static server for the compiled app
-            const adminUiServer = express();
-            adminUiServer.use(express.static(adminUiAppPath));
-            adminUiServer.use((req, res) => {
-                res.sendFile(path.join(adminUiAppPath, 'index.html'));
-            });
-            this.server = adminUiServer.listen(AdminUiPlugin.options.port);
+        let port: number;
+        if (AdminUiPlugin.isDevModeApp(app)) {
+            port = app.port;
+        } else {
+            port = AdminUiPlugin.options.port;
+        }
+
+        if (AdminUiPlugin.isDevModeApp(app)) {
+            Logger.info('Creating admin ui middleware (dev mode)', loggerCtx);
+            consumer
+                .apply(
+                    createProxyHandler({
+                        hostname,
+                        port,
+                        route,
+                        label: 'Admin UI',
+                        basePath: route,
+                    }),
+                )
+                .forRoutes(route);
+            consumer
+                .apply(
+                    createProxyHandler({
+                        hostname,
+                        port,
+                        route: 'sockjs-node',
+                        label: 'Admin UI live reload',
+                        basePath: 'sockjs-node',
+                    }),
+                )
+                .forRoutes('sockjs-node');
+
+            Logger.info('Compiling Admin UI app in development mode', loggerCtx);
+            app.compile().then(
+                () => {
+                    Logger.info('Admin UI compiling and watching for changes...', loggerCtx);
+                },
+                (err: any) => {
+                    Logger.error(`Failed to compile: ${JSON.stringify(err)}`, loggerCtx, err.stack);
+                },
+            );
+            await overwriteConfig();
+        } else {
+            Logger.info('Creating admin ui middleware (prod mode)', loggerCtx);
+            consumer.apply(this.createStaticServer(app)).forRoutes(route);
+
             if (app && typeof app.compile === 'function') {
-                Logger.info(`Compiling Admin UI app in production mode...`, loggerCtx);
+                Logger.info('Compiling Admin UI app in production mode...', loggerCtx);
                 app.compile()
                     .then(overwriteConfig)
                     .then(
                         () => {
-                            Logger.info(`Admin UI successfully compiled`, loggerCtx);
+                            Logger.info('Admin UI successfully compiled', loggerCtx);
                         },
                         (err: any) => {
-                            Logger.error(`Failed to compile: ${err}`, loggerCtx, err.stack);
+                            Logger.error(`Failed to compile: ${JSON.stringify(err)}`, loggerCtx, err.stack);
                         },
                     );
             } else {
                 await overwriteConfig();
             }
-        } else {
-            Logger.info(`Compiling Admin UI app in development mode`, loggerCtx);
-            app.compile().then(
-                () => {
-                    Logger.info(`Admin UI compiling and watching for changes...`, loggerCtx);
-                },
-                (err: any) => {
-                    Logger.error(`Failed to compile: ${err}`, loggerCtx, err.stack);
-                },
-            );
-            await overwriteConfig();
         }
+        registerPluginStartupMessage('Admin UI', route);
     }
 
-    /** @internal */
-    async onVendureClose(): Promise<void> {
-        if (this.server) {
-            await new Promise(resolve => this.server.close(() => resolve()));
-        }
+    private createStaticServer(app?: AdminUiAppConfig) {
+        const adminUiAppPath = (app && app.path) || DEFAULT_APP_PATH;
+
+        const limiter = rateLimit({
+            windowMs: 60 * 1000,
+            limit: process.env.NODE_ENV === 'production' ? 500 : 2000,
+            standardHeaders: true,
+            legacyHeaders: false,
+        });
+
+        const adminUiServer = express.Router();
+        adminUiServer.use(limiter);
+        adminUiServer.use(express.static(adminUiAppPath));
+        adminUiServer.use((req, res) => {
+            res.sendFile(path.join(adminUiAppPath, 'index.html'));
+        });
+
+        return adminUiServer;
     }
 
     /**
@@ -235,26 +267,53 @@ export class AdminUiPlugin implements OnVendureBootstrap, OnVendureClose {
      * config object for writing to disk.
      */
     private getAdminUiConfig(partialConfig?: Partial<AdminUiConfig>): AdminUiConfig {
-        const { authOptions } = this.configService;
-
+        const { authOptions, apiOptions } = this.configService;
+        // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+        const options = AdminUiPlugin.options!;
         const propOrDefault = <Prop extends keyof AdminUiConfig>(
             prop: Prop,
             defaultVal: AdminUiConfig[Prop],
+            isArray: boolean = false,
         ): AdminUiConfig[Prop] => {
-            return partialConfig ? (partialConfig as AdminUiConfig)[prop] || defaultVal : defaultVal;
+            if (isArray) {
+                const isValidArray = !!partialConfig
+                    ? !!((partialConfig as AdminUiConfig)[prop] as any[])?.length
+                    : false;
+
+                return !!partialConfig && isValidArray ? (partialConfig as AdminUiConfig)[prop] : defaultVal;
+            } else {
+                return partialConfig ? (partialConfig as AdminUiConfig)[prop] || defaultVal : defaultVal;
+            }
         };
         return {
-            adminApiPath: propOrDefault('adminApiPath', this.configService.apiOptions.adminApiPath),
-            apiHost: propOrDefault('apiHost', AdminUiPlugin.options.apiHost || 'auto'),
-            apiPort: propOrDefault('apiPort', AdminUiPlugin.options.apiPort || 'auto'),
-            tokenMethod: propOrDefault('tokenMethod', authOptions.tokenMethod || 'cookie'),
+            adminApiPath: propOrDefault('adminApiPath', apiOptions.adminApiPath),
+            apiHost: propOrDefault('apiHost', 'auto'),
+            apiPort: propOrDefault('apiPort', 'auto'),
+            tokenMethod: propOrDefault(
+                'tokenMethod',
+                authOptions.tokenMethod === 'bearer' ? 'bearer' : 'cookie',
+            ),
             authTokenHeaderKey: propOrDefault(
                 'authTokenHeaderKey',
                 authOptions.authTokenHeaderKey || DEFAULT_AUTH_TOKEN_HEADER_KEY,
             ),
+            channelTokenKey: propOrDefault(
+                'channelTokenKey',
+                apiOptions.channelTokenKey || DEFAULT_CHANNEL_TOKEN_KEY,
+            ),
             defaultLanguage: propOrDefault('defaultLanguage', defaultLanguage),
-            availableLanguages: propOrDefault('availableLanguages', defaultAvailableLanguages),
-            loginUrl: AdminUiPlugin.options.adminUiConfig?.loginUrl,
+            defaultLocale: propOrDefault('defaultLocale', defaultLocale),
+            availableLanguages: propOrDefault('availableLanguages', defaultAvailableLanguages, true),
+            availableLocales: propOrDefault('availableLocales', defaultAvailableLocales, true),
+            loginUrl: options.adminUiConfig?.loginUrl,
+            brand: options.adminUiConfig?.brand,
+            hideVendureBranding: propOrDefault(
+                'hideVendureBranding',
+                options.adminUiConfig?.hideVendureBranding || false,
+            ),
+            hideVersion: propOrDefault('hideVersion', options.adminUiConfig?.hideVersion || false),
+            loginImageUrl: options.adminUiConfig?.loginImageUrl,
+            cancellationReasons: propOrDefault('cancellationReasons', undefined),
         };
     }
 
@@ -264,17 +323,43 @@ export class AdminUiPlugin implements OnVendureBootstrap, OnVendureClose {
      */
     private async overwriteAdminUiConfig(adminUiConfigPath: string, config: AdminUiConfig) {
         try {
-            const content = await this.pollForConfigFile(adminUiConfigPath);
-        } catch (e) {
+            const content = await this.pollForFile(adminUiConfigPath);
+        } catch (e: any) {
             Logger.error(e.message, loggerCtx);
             throw e;
         }
         try {
             await fs.writeFile(adminUiConfigPath, JSON.stringify(config, null, 2));
-        } catch (e) {
-            throw new Error('[AdminUiPlugin] Could not write vendure-ui-config.json file:\n' + e.message);
+        } catch (e: any) {
+            throw new Error(
+                '[AdminUiPlugin] Could not write vendure-ui-config.json file:\n' + JSON.stringify(e.message),
+            );
         }
-        Logger.verbose(`Applied configuration to vendure-ui-config.json file`, loggerCtx);
+        Logger.verbose('Applied configuration to vendure-ui-config.json file', loggerCtx);
+    }
+
+    /**
+     * Overwrites the parts of the admin-ui app's `vendure-ui-config.json` file relating to connecting to
+     * the server admin API.
+     */
+    private async overwriteBaseHref(indexHtmlPath: string, baseHref: string) {
+        let indexHtmlContent: string;
+        try {
+            indexHtmlContent = await this.pollForFile(indexHtmlPath);
+        } catch (e: any) {
+            Logger.error(e.message, loggerCtx);
+            throw e;
+        }
+        try {
+            const withCustomBaseHref = indexHtmlContent.replace(
+                /<base href=".+"\s*\/>/,
+                `<base href="/${baseHref}/" />`,
+            );
+            await fs.writeFile(indexHtmlPath, withCustomBaseHref);
+        } catch (e: any) {
+            throw new Error('[AdminUiPlugin] Could not write index.html file:\n' + JSON.stringify(e.message));
+        }
+        Logger.verbose(`Applied baseHref "/${baseHref}/" to index.html file`, loggerCtx);
     }
 
     /**
@@ -282,7 +367,7 @@ export class AdminUiPlugin implements OnVendureBootstrap, OnVendureClose {
      * file to the expected location (particularly when running in watch mode),
      * so polling is used to check multiple times with a delay.
      */
-    private async pollForConfigFile(adminUiConfigPath: string) {
+    private async pollForFile(filePath: string) {
         const maxRetries = 10;
         const retryDelay = 200;
         let attempts = 0;
@@ -291,19 +376,19 @@ export class AdminUiPlugin implements OnVendureBootstrap, OnVendureClose {
 
         while (attempts < maxRetries) {
             try {
-                Logger.verbose(`Checking for config file: ${adminUiConfigPath}`, loggerCtx);
-                const configFileContent = await fs.readFile(adminUiConfigPath, 'utf-8');
+                Logger.verbose(`Checking for admin ui file: ${filePath}`, loggerCtx);
+                const configFileContent = await fs.readFile(filePath, 'utf-8');
                 return configFileContent;
-            } catch (e) {
+            } catch (e: any) {
                 attempts++;
                 Logger.verbose(
-                    `Unable to locate config file: ${adminUiConfigPath} (attempt ${attempts})`,
+                    `Unable to locate admin ui file: ${filePath} (attempt ${attempts})`,
                     loggerCtx,
                 );
             }
             await pause();
         }
-        throw new Error(`Unable to locate config file: ${adminUiConfigPath}`);
+        throw new Error(`Unable to locate admin ui file: ${filePath}`);
     }
 
     private static isDevModeApp(

@@ -1,6 +1,7 @@
 import { JobState } from '@vendure/common/lib/generated-types';
-import { ID } from '@vendure/common/lib/shared-types';
 import { isClassInstance, isObject } from '@vendure/common/lib/shared-utils';
+
+import { Logger } from '../config/logger/vendure-logger';
 
 import { JobConfig, JobData } from './types';
 
@@ -11,7 +12,7 @@ import { JobConfig, JobData } from './types';
  * @docsCategory JobQueue
  * @docsPage Job
  */
-export type JobEventType = 'start' | 'progress' | 'complete' | 'fail';
+export type JobEventType = 'progress';
 
 /**
  * @description
@@ -34,7 +35,7 @@ export type JobEventListener<T extends JobData<T>> = (job: Job<T>) => void;
  * @docsWeight 0
  */
 export class Job<T extends JobData<T> = any> {
-    readonly id: ID | null;
+    readonly id: number | string | null;
     readonly queueName: string;
     readonly retries: number;
     readonly createdAt: Date;
@@ -47,10 +48,7 @@ export class Job<T extends JobData<T> = any> {
     private _startedAt?: Date;
     private _settledAt?: Date;
     private readonly eventListeners: { [type in JobEventType]: Array<JobEventListener<T>> } = {
-        start: [],
         progress: [],
-        complete: [],
-        fail: [],
     };
 
     get name(): string {
@@ -78,7 +76,12 @@ export class Job<T extends JobData<T> = any> {
     }
 
     get isSettled(): boolean {
-        return !!this._settledAt;
+        return (
+            !!this._settledAt &&
+            (this._state === JobState.COMPLETED ||
+                this._state === JobState.FAILED ||
+                this._state === JobState.CANCELLED)
+        );
     }
 
     get startedAt(): Date | undefined {
@@ -90,6 +93,9 @@ export class Job<T extends JobData<T> = any> {
     }
 
     get duration(): number {
+        if (this.state === JobState.PENDING || this.state === JobState.RETRYING) {
+            return 0;
+        }
         const end = this._settledAt || new Date();
         return +end - +(this._startedAt || end);
     }
@@ -123,7 +129,11 @@ export class Job<T extends JobData<T> = any> {
             this._state = JobState.RUNNING;
             this._startedAt = new Date();
             this._attempts++;
-            this.fireEvent('start');
+            Logger.debug(
+                `Job ${this.id?.toString() ?? 'null'} [${this.queueName}] starting (attempt ${
+                    this._attempts
+                } of ${this.retries + 1})`,
+            );
         }
     }
 
@@ -132,7 +142,7 @@ export class Job<T extends JobData<T> = any> {
      * Sets the progress (0 - 100) of the job.
      */
     setProgress(percent: number) {
-        this._progress = Math.min(percent, 100);
+        this._progress = Math.min(percent || 0, 100);
         this.fireEvent('progress');
     }
 
@@ -146,7 +156,7 @@ export class Job<T extends JobData<T> = any> {
         this._progress = 100;
         this._state = JobState.COMPLETED;
         this._settledAt = new Date();
-        this.fireEvent('complete');
+        Logger.debug(`Job ${this.id?.toString() ?? 'null'} [${this.queueName}] completed`);
     }
 
     /**
@@ -158,11 +168,25 @@ export class Job<T extends JobData<T> = any> {
         this._progress = 0;
         if (this.retries >= this._attempts) {
             this._state = JobState.RETRYING;
+            Logger.warn(
+                `Job ${this.id?.toString() ?? 'null'} [${this.queueName}] failed (attempt ${
+                    this._attempts
+                } of ${this.retries + 1})`,
+            );
         } else {
-            this._state = JobState.FAILED;
+            if (this._state !== JobState.CANCELLED) {
+                this._state = JobState.FAILED;
+                Logger.warn(
+                    `Job ${this.id?.toString() ?? 'null'} [${this.queueName}] failed and will not retry.`,
+                );
+            }
             this._settledAt = new Date();
         }
-        this.fireEvent('fail');
+    }
+
+    cancel() {
+        this._settledAt = new Date();
+        this._state = JobState.CANCELLED;
     }
 
     /**
@@ -174,15 +198,25 @@ export class Job<T extends JobData<T> = any> {
         if (this._state === JobState.RUNNING) {
             this._state = JobState.PENDING;
             this._attempts = 0;
+            Logger.debug(
+                `Job ${this.id?.toString() ?? 'null'} [${this.queueName}] deferred back to PENDING state`,
+            );
         }
     }
 
     /**
      * @description
-     * Used to register event handlers for job events
+     * Used to register event handler for job events
      */
     on(eventType: JobEventType, listener: JobEventListener<T>) {
         this.eventListeners[eventType].push(listener);
+    }
+
+    off(eventType: JobEventType, listener: JobEventListener<T>) {
+        const idx = this.eventListeners[eventType].indexOf(listener);
+        if (idx !== -1) {
+            this.eventListeners[eventType].splice(idx, 1);
+        }
     }
 
     private fireEvent(eventType: JobEventType) {
@@ -197,22 +231,55 @@ export class Job<T extends JobData<T> = any> {
      * already be serializable per the TS type, in practice data can slip through due to loss of
      * type safety.
      */
-    private ensureDataIsSerializable(data: any, output?: any): any {
+    private ensureDataIsSerializable(
+        data: any,
+        depth = 0,
+        seen = new WeakMap<any, string[]>(),
+        path: string[] = [],
+    ): any {
+        if (10 < depth) {
+            return '[max depth reached]';
+        }
+        if (data === null || data === undefined) {
+            return data;
+        }
+        // Handle Date objects
         if (data instanceof Date) {
             return data.toISOString();
-        } else if (isObject(data)) {
-            if (!output) {
-                output = {};
+        }
+
+        if (typeof data === 'object' && data !== null) {
+            const seenData = seen.get(data);
+            if (seenData && seenData.length < path.length) {
+                return `[circular *${path.join('.')}]`;
             }
-            for (const key of Object.keys(data)) {
-                output[key] = this.ensureDataIsSerializable((data as any)[key]);
-            }
-            if (isClassInstance(data)) {
-                const descriptors = Object.getOwnPropertyDescriptors(Object.getPrototypeOf(data));
-                for (const name of Object.keys(descriptors)) {
-                    const descriptor = descriptors[name];
-                    if (typeof descriptor.get === 'function') {
-                        output[name] = (data as any)[name];
+            seen.set(data, path);
+        }
+
+        depth++;
+        let output: any;
+        if (isObject(data)) {
+            output = {};
+            // If the object has a `.toJSON()` function defined, then
+            // prefer it to any other type of serialization.
+            if (this.hasToJSONFunction(data)) {
+                output = data.toJSON();
+            } else {
+                for (const key of Object.keys(data)) {
+                    output[key] = this.ensureDataIsSerializable(
+                        (data as any)[key],
+                        depth,
+                        seen,
+                        path.concat(key),
+                    );
+                }
+                if (isClassInstance(data)) {
+                    const descriptors = Object.getOwnPropertyDescriptors(Object.getPrototypeOf(data));
+                    for (const name of Object.keys(descriptors)) {
+                        const descriptor = descriptors[name];
+                        if (typeof descriptor.get === 'function') {
+                            output[name] = (data as any)[name];
+                        }
                     }
                 }
             }
@@ -221,11 +288,15 @@ export class Job<T extends JobData<T> = any> {
                 output = [];
             }
             data.forEach((item, i) => {
-                output[i] = this.ensureDataIsSerializable(item);
+                output[i] = this.ensureDataIsSerializable(item, depth, seen, path.concat(i.toString()));
             });
         } else {
             return data;
         }
         return output;
+    }
+
+    private hasToJSONFunction(obj: any): obj is { toJSON(): any } {
+        return typeof obj?.toJSON === 'function';
     }
 }

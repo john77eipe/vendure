@@ -1,7 +1,22 @@
 import { RequestContext } from '../../../api/common/request-context';
-import { Transitions } from '../../../common/finite-state-machine/types';
 import { Order } from '../../../entity/order/order.entity';
 import { Payment } from '../../../entity/payment/payment.entity';
+
+/**
+ * @description
+ * An interface to extend standard {@link PaymentState}.
+ *
+ * @deprecated use PaymentStates
+ */
+export interface CustomPaymentStates {}
+
+/**
+ * @description
+ * An interface to extend standard {@link PaymentState}.
+ *
+ * @docsCategory payment
+ */
+export interface PaymentStates {}
 
 /**
  * @description
@@ -9,25 +24,12 @@ import { Payment } from '../../../entity/payment/payment.entity';
  *
  * @docsCategory payment
  */
-export type PaymentState = 'Created' | 'Authorized' | 'Settled' | 'Declined' | 'Error';
-
-export const paymentStateTransitions: Transitions<PaymentState> = {
-    Created: {
-        to: ['Authorized', 'Settled', 'Declined', 'Error'],
-    },
-    Authorized: {
-        to: ['Settled', 'Error'],
-    },
-    Settled: {
-        to: [],
-    },
-    Declined: {
-        to: [],
-    },
-    Error: {
-        to: [],
-    },
-};
+export type PaymentState =
+    | 'Created'
+    | 'Error'
+    | 'Cancelled'
+    | keyof CustomPaymentStates
+    | keyof PaymentStates;
 
 /**
  * @description

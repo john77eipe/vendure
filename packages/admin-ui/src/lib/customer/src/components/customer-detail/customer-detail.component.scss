@@ -1,6 +1,9 @@
-@import "variables";
 
 .last-login {
-    margin-left: 6px;
-    color: $color-grey-500;
+    margin-inline-start: 6px;
+    color: var(--color-grey-500);
+}
+
+.to-delete {
+    opacity: 0.5;
 }

@@ -1,36 +1,56 @@
 import { Route } from '@angular/router';
 import { marker as _ } from '@biesbjerg/ngx-translate-extract-marker';
-import { CanDeactivateDetailGuard, createResolveData, detailBreadcrumb, OrderDetail } from '@vendure/admin-ui/core';
+import { PageComponent, PageService } from '@vendure/admin-ui/core';
+import { OrderGuard } from './providers/routing/order.guard';
 
-import { OrderDetailComponent } from './components/order-detail/order-detail.component';
-import { OrderListComponent } from './components/order-list/order-list.component';
-import { OrderResolver } from './providers/routing/order-resolver';
-
-export const orderRoutes: Route[] = [
+export const createRoutes = (pageService: PageService): Route[] => [
     {
         path: '',
-        component: OrderListComponent,
+        component: PageComponent,
         data: {
+            locationId: 'order-list',
             breadcrumb: _('breadcrumb.orders'),
         },
+        children: pageService.getPageTabRoutes('order-list'),
+    },
+    {
+        path: 'draft/:id',
+        component: PageComponent,
+        canActivate: [OrderGuard],
+        data: {
+            locationId: 'draft-order-detail',
+            breadcrumb: { label: _('breadcrumb.orders'), link: ['../'] },
+        },
+        children: pageService.getPageTabRoutes('draft-order-detail'),
     },
     {
         path: ':id',
-        component: OrderDetailComponent,
-        resolve: createResolveData(OrderResolver),
-        canDeactivate: [CanDeactivateDetailGuard],
+        component: PageComponent,
+        canActivate: [OrderGuard],
         data: {
-            breadcrumb: orderBreadcrumb,
+            locationId: 'order-detail',
+            breadcrumb: { label: _('breadcrumb.orders'), link: ['../'] },
         },
+        children: pageService.getPageTabRoutes('order-detail'),
+    },
+    {
+        path: ':aggregateOrderId/seller-orders/:id',
+        component: PageComponent,
+        canActivate: [OrderGuard],
+        data: {
+            locationId: 'order-detail',
+            breadcrumb: { label: _('breadcrumb.orders'), link: ['../'] },
+        },
+        children: pageService.getPageTabRoutes('order-detail'),
+    },
+    {
+        path: ':id/modify',
+        component: PageComponent,
+        canActivate: [OrderGuard],
+        data: {
+            locationId: 'modify-order',
+            breadcrumb: { label: _('breadcrumb.orders'), link: ['../'] },
+        },
+        children: pageService.getPageTabRoutes('modify-order'),
     },
 ];
-
-export function orderBreadcrumb(data: any, params: any) {
-    return detailBreadcrumb<OrderDetail.Fragment>({
-        entity: data.entity,
-        id: params.id,
-        breadcrumbKey: 'breadcrumb.orders',
-        getName: order => order.code,
-        route: '',
-    });
-}

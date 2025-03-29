@@ -1,40 +1,63 @@
+import { ApolloServerPlugin } from '@apollo/server';
+import { RenderPageOptions } from '@apollographql/graphql-playground-html';
 import { DynamicModule, Type } from '@nestjs/common';
 import { CorsOptions } from '@nestjs/common/interfaces/external/cors-options.interface';
-import { ClientOptions, Transport } from '@nestjs/microservices';
 import { LanguageCode } from '@vendure/common/lib/generated-types';
-import { PluginDefinition } from 'apollo-server-core';
-import { RequestHandler } from 'express';
-import { Observable } from 'rxjs';
-import { ConnectionOptions } from 'typeorm';
+import { ValidationContext } from 'graphql';
+import { DataSourceOptions } from 'typeorm';
 
-import { RequestContext } from '../api/common/request-context';
-import { Transitions } from '../common/finite-state-machine/types';
+import { Middleware } from '../common';
 import { PermissionDefinition } from '../common/permission-definition';
-import { Order } from '../entity/order/order.entity';
-import { OrderState } from '../service/helpers/order-state-machine/order-state';
+import { JobBufferStorageStrategy } from '../job-queue/job-buffer/job-buffer-storage-strategy';
 
+import { AssetImportStrategy } from './asset-import-strategy/asset-import-strategy';
 import { AssetNamingStrategy } from './asset-naming-strategy/asset-naming-strategy';
 import { AssetPreviewStrategy } from './asset-preview-strategy/asset-preview-strategy';
 import { AssetStorageStrategy } from './asset-storage-strategy/asset-storage-strategy';
 import { AuthenticationStrategy } from './auth/authentication-strategy';
-import { CollectionFilter } from './collection/collection-filter';
+import { PasswordHashingStrategy } from './auth/password-hashing-strategy';
+import { PasswordValidationStrategy } from './auth/password-validation-strategy';
+import { CollectionFilter } from './catalog/collection-filter';
+import { ProductVariantPriceCalculationStrategy } from './catalog/product-variant-price-calculation-strategy';
+import { ProductVariantPriceSelectionStrategy } from './catalog/product-variant-price-selection-strategy';
+import { ProductVariantPriceUpdateStrategy } from './catalog/product-variant-price-update-strategy';
+import { StockDisplayStrategy } from './catalog/stock-display-strategy';
+import { StockLocationStrategy } from './catalog/stock-location-strategy';
 import { CustomFields } from './custom-field/custom-field-types';
-import { EntityIdStrategy } from './entity-id-strategy/entity-id-strategy';
-import { CustomFulfillmentProcess } from './fulfillment/custom-fulfillment-process';
+import { EntityDuplicator } from './entity/entity-duplicator';
+import { EntityIdStrategy } from './entity/entity-id-strategy';
+import { MoneyStrategy } from './entity/money-strategy';
+import { EntityMetadataModifier } from './entity-metadata/entity-metadata-modifier';
+import { FulfillmentHandler } from './fulfillment/fulfillment-handler';
+import { FulfillmentProcess } from './fulfillment/fulfillment-process';
 import { JobQueueStrategy } from './job-queue/job-queue-strategy';
 import { VendureLogger } from './logger/vendure-logger';
-import { CustomOrderProcess } from './order/custom-order-process';
+import { ActiveOrderStrategy } from './order/active-order-strategy';
+import { ChangedPriceHandlingStrategy } from './order/changed-price-handling-strategy';
+import { GuestCheckoutStrategy } from './order/guest-checkout-strategy';
+import { OrderByCodeAccessStrategy } from './order/order-by-code-access-strategy';
 import { OrderCodeStrategy } from './order/order-code-strategy';
+import { OrderInterceptor } from './order/order-interceptor';
+import { OrderItemPriceCalculationStrategy } from './order/order-item-price-calculation-strategy';
 import { OrderMergeStrategy } from './order/order-merge-strategy';
-import { PriceCalculationStrategy } from './order/price-calculation-strategy';
+import { OrderPlacedStrategy } from './order/order-placed-strategy';
+import { OrderProcess } from './order/order-process';
+import { OrderSellerStrategy } from './order/order-seller-strategy';
 import { StockAllocationStrategy } from './order/stock-allocation-strategy';
-import { PaymentMethodHandler } from './payment-method/payment-method-handler';
+import { PaymentMethodEligibilityChecker } from './payment/payment-method-eligibility-checker';
+import { PaymentMethodHandler } from './payment/payment-method-handler';
+import { PaymentProcess } from './payment/payment-process';
 import { PromotionAction } from './promotion/promotion-action';
 import { PromotionCondition } from './promotion/promotion-condition';
+import { RefundProcess } from './refund/refund-process';
 import { SessionCacheStrategy } from './session-cache/session-cache-strategy';
 import { ShippingCalculator } from './shipping-method/shipping-calculator';
 import { ShippingEligibilityChecker } from './shipping-method/shipping-eligibility-checker';
-import { TaxCalculationStrategy } from './tax/tax-calculation-strategy';
+import { ShippingLineAssignmentStrategy } from './shipping-method/shipping-line-assignment-strategy';
+import { CacheStrategy } from './system/cache-strategy';
+import { ErrorHandlerStrategy } from './system/error-handler-strategy';
+import { HealthCheckStrategy } from './system/health-check-strategy';
+import { TaxLineCalculationStrategy } from './tax/tax-line-calculation-strategy';
 import { TaxZoneStrategy } from './tax/tax-zone-strategy';
 
 /**
@@ -68,7 +91,7 @@ export interface ApiOptions {
     adminApiPath?: string;
     /**
      * @description
-     * The path to the admin GraphQL API.
+     * The path to the shop GraphQL API.
      *
      * @default 'shop-api'
      */
@@ -80,7 +103,7 @@ export interface ApiOptions {
      *
      * @default false
      */
-    adminApiPlayground?: boolean | any;
+    adminApiPlayground?: boolean | RenderPageOptions;
     /**
      * @description
      * The playground config to the shop GraphQL API
@@ -88,7 +111,7 @@ export interface ApiOptions {
      *
      * @default false
      */
-    shopApiPlayground?: boolean | any;
+    shopApiPlayground?: boolean | RenderPageOptions;
     /**
      * @description
      * The debug config to the admin GraphQL API
@@ -99,12 +122,44 @@ export interface ApiOptions {
     adminApiDebug?: boolean;
     /**
      * @description
-     * The debug config to the admin GraphQL API
+     * The debug config to the shop GraphQL API
      * [ApolloServer playground](https://www.apollographql.com/docs/apollo-server/api/apollo-server/#constructoroptions-apolloserver).
      *
      * @default false
      */
     shopApiDebug?: boolean;
+    /**
+     * @description
+     * The maximum number of items that may be returned by a query which returns a `PaginatedList` response. In other words,
+     * this is the upper limit of the `take` input option.
+     *
+     * @default 100
+     */
+    shopListQueryLimit?: number;
+    /**
+     * @description
+     * The maximum number of items that may be returned by a query which returns a `PaginatedList` response. In other words,
+     * this is the upper limit of the `take` input option.
+     *
+     * @default 1000
+     */
+    adminListQueryLimit?: number;
+    /**
+     * @description
+     * Custom functions to use as additional validation rules when validating the schema for the admin GraphQL API
+     * [ApolloServer validation rules](https://www.apollographql.com/docs/apollo-server/api/apollo-server/#validationrules).
+     *
+     * @default []
+     */
+    adminApiValidationRules?: Array<(context: ValidationContext) => any>;
+    /**
+     * @description
+     * Custom functions to use as additional validation rules when validating the schema for the shop GraphQL API
+     * [ApolloServer validation rules](https://www.apollographql.com/docs/apollo-server/api/apollo-server/#validationrules).
+     *
+     * @default []
+     */
+    shopApiValidationRules?: Array<(context: ValidationContext) => any>;
     /**
      * @description
      * The name of the property which contains the token of the
@@ -123,11 +178,11 @@ export interface ApiOptions {
     cors?: boolean | CorsOptions;
     /**
      * @description
-     * Custom Express middleware for the server.
+     * Custom Express or NestJS middleware for the server. More information can be found in the {@link Middleware} docs.
      *
      * @default []
      */
-    middleware?: Array<{ handler: RequestHandler; route: string }>;
+    middleware?: Middleware[];
     /**
      * @description
      * Custom [ApolloServerPlugins](https://www.apollographql.com/docs/apollo-server/integrations/plugins/) which
@@ -138,7 +193,27 @@ export interface ApiOptions {
      *
      * @default []
      */
-    apolloServerPlugins?: PluginDefinition[];
+    apolloServerPlugins?: ApolloServerPlugin[];
+    /**
+     * @description
+     * Controls whether introspection of the GraphQL APIs is enabled. For production, it is recommended to disable
+     * introspection, since exposing your entire schema can allow an attacker to trivially learn all operations
+     * and much more easily find any potentially exploitable queries.
+     *
+     * **Note:** when introspection is disabled, tooling which relies on it for things like autocompletion
+     * will not work.
+     *
+     * @example
+     * ```ts
+     * {
+     *   introspection: process.env.NODE_ENV !== 'production'
+     * }
+     * ```
+     *
+     * @default true
+     * @since 1.5.0
+     */
+    introspection?: boolean;
 }
 
 /**
@@ -152,15 +227,22 @@ export interface ApiOptions {
 export interface CookieOptions {
     /**
      * @description
-     * The name of the cookie to set.
+     * The name of the cookies to set.
+     * If set to a string, both cookies for the Admin API and Shop API will have the same name.
+     * If set as an object, it makes it possible to give different names to the Admin API and the Shop API cookies
      *
      * @default 'session'
      */
-    name?: string;
+    name?: string | { shop: string; admin: string };
 
     /**
      * @description
-     * A string which will be used as single key if keys is not provided.
+     * The secret used for signing the session cookies for authenticated users. Only applies
+     * tokenMethod is set to 'cookie'.
+     *
+     * In production applications, this should not be stored as a string in
+     * source control for security reasons, but may be loaded from an external
+     * file not under source control, or from an environment variable, for example.
      *
      * @default (random character string)
      */
@@ -223,6 +305,22 @@ export interface CookieOptions {
      * the same request with the same name (regardless of path or domain) are filtered out of the Set-Cookie header when setting this cookie.
      */
     overwrite?: boolean;
+
+    /**
+     * @description
+     * A number representing the milliseconds from Date.now() for expiry
+     *
+     * @since 2.2.0
+     */
+    maxAge?: number;
+
+    /**
+     * @description
+     * a Date object indicating the cookie's expiration date (expires at the end of session by default).
+     *
+     * @since 2.2.0
+     */
+    expires?: Date;
 }
 
 /**
@@ -255,24 +353,11 @@ export interface AuthOptions {
      * `authTokenHeaderKey` in the server's CORS configuration (adding `Access-Control-Expose-Headers: vendure-auth-token`
      * by default).
      *
+     * From v1.2.0 it is possible to specify both methods as a tuple: `['cookie', 'bearer']`.
+     *
      * @default 'cookie'
      */
-    tokenMethod?: 'cookie' | 'bearer';
-    /**
-     * @description
-     * **Deprecated** use `cookieConfig.secret` instead.
-     *
-     * The secret used for signing the session cookies for authenticated users. Only applies when
-     * tokenMethod is set to 'cookie'.
-     *
-     * In production applications, this should not be stored as a string in
-     * source control for security reasons, but may be loaded from an external
-     * file not under source control, or from an environment variable, for example.
-     *
-     * @default 'session-secret'
-     * @deprecated use `cookieConfig.secret` instead
-     */
-    sessionSecret?: string;
+    tokenMethod?: 'cookie' | 'bearer' | ReadonlyArray<'cookie' | 'bearer'>;
     /**
      * @description
      * Options related to the handling of cookies when using the 'cookie' tokenMethod.
@@ -290,7 +375,7 @@ export interface AuthOptions {
      * Session duration, i.e. the time which must elapse from the last authenticated request
      * after which the user must re-authenticate.
      *
-     * Expressed as a string describing a time span per
+     * If passed as a number should represent milliseconds and if passed as a string describes a time span per
      * [zeit/ms](https://github.com/zeit/ms.js).  Eg: `60`, `'2 days'`, `'10h'`, `'7d'`
      *
      * @default '1y'
@@ -298,38 +383,38 @@ export interface AuthOptions {
     sessionDuration?: string | number;
     /**
      * @description
-     * This strategy defines how sessions will be cached. By default, sessions are cached using a simple
-     * in-memory caching strategy which is suitable for development and low-traffic, single-instance
-     * deployments.
+     * This strategy defines how sessions will be cached. By default, since v3.1.0, sessions are cached using
+     * the underlying cache strategy defined in the {@link SystemOptions}`.cacheStrategy`.
      *
-     * @default InMemorySessionCacheStrategy
+     * @default DefaultSessionCacheStrategy
      */
     sessionCacheStrategy?: SessionCacheStrategy;
     /**
      * @description
-     * The "time to live" of a given item in the session cache. This determines the length of time (in seconds)
-     * that a cache entry is kept before being considered "stale" and being replaced with fresh data
-     * taken from the database.
+     * The "time to live" of a given item in the session cache. This determines the length of time that a cache entry
+     * is kept before being considered "stale" and being replaced with fresh data taken from the database.
+     *
+     * If passed as a number should represent seconds and if passed as a string describes a time span per
+     * [zeit/ms](https://github.com/zeit/ms.js). Eg: `60`, `'2 days'`, `'10h'`, `'7d'`
      *
      * @default 300
      */
-    sessionCacheTTL?: number;
+    sessionCacheTTL?: string | number;
     /**
      * @description
      * Determines whether new User accounts require verification of their email address.
      *
-     * If set to "true", when registering via the `registerCustomerAccount` mutation, one should *not* set the
-     * `password` property - doing so will result in an error. Instead, the password is set at a later stage
-     * (once the email with the verification token has been opened) via the `verifyCustomerAccount` mutation.
+     * If set to "true", the customer will be required to verify their email address using a verification token
+     * they receive in their email. See the `registerCustomerAccount` mutation for more details on the verification behavior.
      *
-     * @defaut true
+     * @default true
      */
     requireVerification?: boolean;
     /**
      * @description
      * Sets the length of time that a verification token is valid for, after which the verification token must be refreshed.
      *
-     * Expressed as a string describing a time span per
+     * If passed as a number should represent milliseconds and if passed as a string describes a time span per
      * [zeit/ms](https://github.com/zeit/ms.js).  Eg: `60`, `'2 days'`, `'10h'`, `'7d'`
      *
      * @default '7d'
@@ -362,6 +447,35 @@ export interface AuthOptions {
      * @default []
      */
     customPermissions?: PermissionDefinition[];
+    /**
+     * @description
+     * Allows you to customize the way passwords are hashed when using the {@link NativeAuthenticationStrategy}.
+     *
+     * @default BcryptPasswordHashingStrategy
+     * @since 1.3.0
+     */
+    passwordHashingStrategy?: PasswordHashingStrategy;
+    /**
+     * @description
+     * Allows you to set a custom policy for passwords when using the {@link NativeAuthenticationStrategy}.
+     * By default, it uses the {@link DefaultPasswordValidationStrategy}, which will impose a minimum length
+     * of four characters. To improve security for production, you are encouraged to specify a more strict
+     * policy, which you can do like this:
+     *
+     * @example
+     * ```ts
+     * {
+     *   passwordValidationStrategy: new DefaultPasswordValidationStrategy({
+     *     // Minimum eight characters, at least one letter and one number
+     *     regexp: /^(?=.*[A-Za-z])(?=.*\d)[A-Za-z\d]{8,}$/,
+     *   }),
+     * }
+     * ```
+     *
+     * @since 1.5.0
+     * @default DefaultPasswordValidationStrategy
+     */
+    passwordValidationStrategy?: PasswordValidationStrategy;
 }
 
 /**
@@ -378,34 +492,45 @@ export interface OrderOptions {
      * to perform price calculations against active promotions and taxes. This can have a significant
      * performance impact for very large values.
      *
-     * Attempting to exceed this limit will cause Vendure to throw a {@link OrderItemsLimitError}.
+     * Attempting to exceed this limit will cause Vendure to throw a `OrderLimitError`.
      *
      * @default 999
      */
     orderItemsLimit?: number;
     /**
      * @description
-     * Defines the logic used to calculate the unit price of an OrderItem when adding an
+     * The maximum number of items allowed per order line. This option is an addition
+     * on the `orderItemsLimit` for more granular control. Note `orderItemsLimit` is still
+     * important in order to prevent excessive resource usage.
+     *
+     * Attempting to exceed this limit will cause Vendure to throw a OrderLimitError`.
+     *
+     * @default 999
+     */
+    orderLineItemsLimit?: number;
+    /**
+     * @description
+     * Defines the logic used to calculate the unit price of an OrderLine when adding an
      * item to an Order.
      *
      * @default DefaultPriceCalculationStrategy
      */
-    priceCalculationStrategy?: PriceCalculationStrategy;
+    orderItemPriceCalculationStrategy?: OrderItemPriceCalculationStrategy;
     /**
      * @description
      * Allows the definition of custom states and transition logic for the order process state machine.
-     * Takes an array of objects implementing the {@link CustomOrderProcess} interface.
+     * Takes an array of objects implementing the {@link OrderProcess} interface.
      *
      * @default []
      */
-    process?: Array<CustomOrderProcess<any>>;
+    process?: Array<OrderProcess<any>>;
     /**
      * @description
      * Determines the point of the order process at which stock gets allocated.
      *
      * @default DefaultStockAllocationStrategy
      */
-    stockAllocationStrategy: StockAllocationStrategy;
+    stockAllocationStrategy?: StockAllocationStrategy;
     /**
      * @description
      * Defines the strategy used to merge a guest Order and an existing Order when
@@ -435,6 +560,72 @@ export interface OrderOptions {
      * @default DefaultOrderCodeStrategy
      */
     orderCodeStrategy?: OrderCodeStrategy;
+    /**
+     * @description
+     * Defines the strategy used to check if and how an Order may be retrieved via the orderByCode query.
+     *
+     * The default strategy permits permanent access to the Customer owning the Order and anyone
+     * within 2 hours after placing the Order.
+     *
+     * @since 1.1.0
+     * @default DefaultOrderByCodeAccessStrategy
+     */
+    orderByCodeAccessStrategy?: OrderByCodeAccessStrategy;
+    /**
+     * @description
+     * Defines how we handle the situation where an item exists in an Order, and
+     * then later on another is added but in the meantime the price of the ProductVariant has changed.
+     *
+     * By default, the latest price will be used. Any price changes resulting from using a newer price
+     * will be reflected in the GraphQL `OrderLine.unitPrice[WithTax]ChangeSinceAdded` field.
+     *
+     * @default DefaultChangedPriceHandlingStrategy
+     */
+    changedPriceHandlingStrategy?: ChangedPriceHandlingStrategy;
+    /**
+     * @description
+     * Defines the point of the order process at which the Order is set as "placed".
+     *
+     * @default DefaultOrderPlacedStrategy
+     */
+    orderPlacedStrategy?: OrderPlacedStrategy;
+    /**
+     * @description
+     * Defines the strategy used to determine the active Order when interacting with Shop API operations
+     * such as `activeOrder` and `addItemToOrder`. By default, the strategy uses the active Session.
+     *
+     * Note that if multiple strategies are defined, they will be checked in order and the first one that
+     * returns an Order will be used.
+     *
+     * @since 1.9.0
+     * @default DefaultActiveOrderStrategy
+     */
+    activeOrderStrategy?: ActiveOrderStrategy<any> | Array<ActiveOrderStrategy<any>>;
+    /**
+     * @description
+     * Defines how Orders will be split amongst multiple Channels in a multivendor scenario.
+     *
+     * @since 2.0.0
+     * @default DefaultOrderSellerStrategy
+     */
+    orderSellerStrategy?: OrderSellerStrategy;
+    /**
+     * @description
+     * Defines how we deal with guest checkouts.
+     *
+     * @sinc
+     * e 2.0.0
+     * @default DefaultGuestCheckoutStrategy
+     */
+    guestCheckoutStrategy?: GuestCheckoutStrategy;
+    /**
+     * @description
+     * An array of {@link OrderInterceptor}s which can be used to modify the behavior of the Order process.
+     *
+     * @since 3.1.0
+     * @default []
+     */
+    orderInterceptors?: OrderInterceptor[];
 }
 
 /**
@@ -490,7 +681,7 @@ export interface AssetOptions {
  * @description
  * Options related to products and collections.
  *
- * @docsCategory configuration
+ * @docsCategory products & stock
  */
 export interface CatalogOptions {
     /**
@@ -499,7 +690,56 @@ export interface CatalogOptions {
      *
      * @default defaultCollectionFilters
      */
-    collectionFilters: Array<CollectionFilter<any>>;
+    collectionFilters?: Array<CollectionFilter<any>>;
+    /**
+     * @description
+     * Defines the strategy used to select the price of a ProductVariant, based on factors
+     * such as the active Channel and active CurrencyCode.
+     *
+     * @since 2.0.0
+     * @default DefaultProductVariantPriceSelectionStrategy
+     */
+    productVariantPriceSelectionStrategy?: ProductVariantPriceSelectionStrategy;
+    /**
+     * @description
+     * Defines the strategy used for calculating the price of ProductVariants based
+     * on the Channel settings and active tax Zone.
+     *
+     * @default DefaultTaxCalculationStrategy
+     */
+    productVariantPriceCalculationStrategy?: ProductVariantPriceCalculationStrategy;
+    /**
+     * @description
+     * Defines the strategy which determines what happens to a ProductVariant's prices
+     * when one of the prices gets updated. For instance, this can be used to synchronize
+     * prices across multiple Channels.
+     *
+     * @default DefaultProductVariantPriceUpdateStrategy
+     * @since 2.2.0
+     */
+    productVariantPriceUpdateStrategy?: ProductVariantPriceUpdateStrategy;
+    /**
+     * @description
+     * Defines how the `ProductVariant.stockLevel` value is obtained. It is usually not desirable
+     * to directly expose stock levels over a public API, as this could be considered a leak of
+     * sensitive information. However, the storefront will usually want to display _some_ indication
+     * of whether a given ProductVariant is in stock. The default StockDisplayStrategy will
+     * display "IN_STOCK", "OUT_OF_STOCK" or "LOW_STOCK" rather than exposing the actual saleable
+     * stock level.
+     *
+     * @default DefaultStockDisplayStrategy
+     */
+    stockDisplayStrategy?: StockDisplayStrategy;
+    /**
+     * @description
+     * Defines the strategy used to determine which StockLocation should be used when performing
+     * stock operations such as allocating and releasing stock as well as determining the
+     * amount of stock available for sale.
+     *
+     * @default DefaultStockLocationStrategy
+     * @since 2.0.0
+     */
+    stockLocationStrategy?: StockLocationStrategy;
 }
 
 /**
@@ -532,13 +772,37 @@ export interface ShippingOptions {
      * An array of available ShippingCalculators for use in configuring ShippingMethods
      */
     shippingCalculators?: Array<ShippingCalculator<any>>;
-
+    /**
+     * @description
+     * This strategy is used to assign a given {@link ShippingLine} to one or more {@link OrderLine}s of the Order.
+     * This allows you to set multiple shipping methods for a single order, each assigned a different subset of
+     * OrderLines.
+     *
+     * @since 2.0.0
+     */
+    shippingLineAssignmentStrategy?: ShippingLineAssignmentStrategy;
     /**
      * @description
      * Allows the definition of custom states and transition logic for the fulfillment process state machine.
-     * Takes an array of objects implementing the {@link CustomFulfillmentProcess} interface.
+     * Takes an array of objects implementing the {@link FulfillmentProcess} interface.
+     *
+     * @deprecated use `process`
      */
-    customFulfillmentProcess?: Array<CustomFulfillmentProcess<any>>;
+    customFulfillmentProcess?: Array<FulfillmentProcess<any>>;
+    /**
+     * @description
+     * Allows the definition of custom states and transition logic for the fulfillment process state machine.
+     * Takes an array of objects implementing the {@link FulfillmentProcess} interface.
+     *
+     * @since 2.0.0
+     * @default defaultFulfillmentProcess
+     */
+    process?: Array<FulfillmentProcess<any>>;
+    /**
+     * @description
+     * An array of available FulfillmentHandlers.
+     */
+    fulfillmentHandlers?: Array<FulfillmentHandler<any>>;
 }
 
 /**
@@ -573,9 +837,37 @@ export interface SuperadminCredentials {
 export interface PaymentOptions {
     /**
      * @description
-     * An array of {@link PaymentMethodHandler}s with which to process payments.
+     * Defines which {@link PaymentMethodHandler}s are available when configuring
+     * {@link PaymentMethod}s
      */
     paymentMethodHandlers: PaymentMethodHandler[];
+    /**
+     * @description
+     * Defines which {@link PaymentMethodEligibilityChecker}s are available when configuring
+     * {@link PaymentMethod}s
+     */
+    paymentMethodEligibilityCheckers?: PaymentMethodEligibilityChecker[];
+    /**
+     * @deprecated use `process`
+     */
+    customPaymentProcess?: Array<PaymentProcess<any>>;
+    /**
+     * @description
+     * Allows the definition of custom states and transition logic for the payment process state machine.
+     * Takes an array of objects implementing the {@link PaymentProcess} interface.
+     *
+     * @default defaultPaymentProcess
+     * @since 2.0.0
+     */
+    process?: Array<PaymentProcess<any>>;
+    /**
+     * @description
+     * Allows the definition of custom states and transition logic for the refund process state machine.
+     * Takes an array of objects implementing the {@link RefundProcess} interface.
+     *
+     * @default defaultRefundProcess
+     */
+    refundProcess?: Array<RefundProcess<any>>;
 }
 
 /**
@@ -589,14 +881,14 @@ export interface TaxOptions {
      *
      * @default DefaultTaxZoneStrategy
      */
-    taxZoneStrategy: TaxZoneStrategy;
+    taxZoneStrategy?: TaxZoneStrategy;
     /**
      * @description
-     * Defines the strategy used for calculating taxes.
+     * Defines the strategy used to calculate the TaxLines added to OrderItems.
      *
-     * @default DefaultTaxCalculationStrategy
+     * @default DefaultTaxLineCalculationStrategy
      */
-    taxCalculationStrategy: TaxCalculationStrategy;
+    taxLineCalculationStrategy?: TaxLineCalculationStrategy;
 }
 
 /**
@@ -613,60 +905,14 @@ export interface ImportExportOptions {
      * @default __dirname
      */
     importAssetsDir?: string;
-}
-
-/**
- * @description
- * Options related to the Vendure Worker.
- *
- * @example
- * ```TypeScript
- * import { Transport } from '\@nestjs/microservices';
- *
- * const config: VendureConfig = {
- *     // ...
- *     workerOptions: {
- *         transport: Transport.TCP,
- *         options: {
- *             host: 'localhost',
- *             port: 3001,
- *         },
- *     },
- * }
- * ```
- *
- * @docsCategory worker
- */
-export interface WorkerOptions {
     /**
      * @description
-     * If set to `true`, the Worker will run be bootstrapped as part of the main Vendure server (when invoking the
-     * `bootstrap()` function) and will run in the same process. This mode is intended only for development and
-     * testing purposes, not for production, since running the Worker in the main process negates the benefits
-     * of having long-running or expensive tasks run in the background.
+     * This strategy determines how asset files get imported based on the path given in the
+     * import CSV or via the {@link AssetImporter} `getAssets()` method.
      *
-     * @default false
+     * @since 1.7.0
      */
-    runInMainProcess?: boolean;
-    /**
-     * @description
-     * Sets the transport protocol used to communicate with the Worker. Options include TCP, Redis, gPRC and more. See the
-     * [NestJS microservices documentation](https://docs.nestjs.com/microservices/basics) for a full list.
-     *
-     * @default Transport.TCP
-     */
-    transport?: Transport;
-    /**
-     * @description
-     * Additional options related to the chosen transport method. See See the
-     * [NestJS microservices documentation](https://docs.nestjs.com/microservices/basics) for details on the options relating to each of the
-     * transport methods.
-     *
-     * By default, the options for the TCP transport will run with the following settings:
-     * * host: 'localhost'
-     * * port: 3020
-     */
-    options?: ClientOptions['options'];
+    assetImportStrategy?: AssetImportStrategy;
 }
 
 /**
@@ -683,20 +929,162 @@ export interface JobQueueOptions {
      * @default InMemoryJobQueueStrategy
      */
     jobQueueStrategy?: JobQueueStrategy;
+    jobBufferStorageStrategy?: JobBufferStorageStrategy;
     /**
      * @description
-     * Defines the interval in ms used by the {@link JobQueueService} to poll for new
-     * jobs in the queue to process.
-     *
-     * @default 200
+     * Defines the queues that will run in this process.
+     * This can be used to configure only certain queues to run in this process.
+     * If its empty all queues will be run. Note: this option is primarily intended
+     * to apply to the Worker process. Jobs will _always_ get published to the queue
+     * regardless of this setting, but this setting determines whether they get
+     * _processed_ or not.
      */
-    pollInterval?: number;
+    activeQueues?: string[];
+    /**
+     * @description
+     * Prefixes all job queue names with the passed string. This is useful with multiple deployments
+     * in cloud environments using services such as Amazon SQS or Google Cloud Tasks.
+     *
+     * For example, we might have a staging and a production deployment in the same account/project and
+     * each one will need its own task queue. We can achieve this with a prefix.
+     *
+     * @since 1.5.0
+     */
+    prefix?: string;
+}
+
+/**
+ * @description
+ * Options relating to the internal handling of entities.
+ *
+ * @since 1.3.0
+ * @docsCategory configuration
+ * @docsPage EntityOptions
+ * @docsWeight 0
+ */
+export interface EntityOptions {
+    /**
+     * @description
+     * Defines the strategy used for both storing the primary keys of entities
+     * in the database, and the encoding & decoding of those ids when exposing
+     * entities via the API. The default uses a simple auto-increment integer
+     * strategy.
+     *
+     * :::caution
+     * Note: changing from an integer-based strategy to a uuid-based strategy
+     * on an existing Vendure database will lead to problems with broken foreign-key
+     * references. To change primary key types like this, you'll need to start with
+     * a fresh database.
+     * :::
+     *
+     * @since 1.3.0
+     * @default AutoIncrementIdStrategy
+     */
+    entityIdStrategy?: EntityIdStrategy<any>;
+    /**
+     * @description
+     * An array of {@link EntityDuplicator} instances which are used to duplicate entities
+     * when using the `duplicateEntity` mutation.
+     *
+     * @since 2.2.0
+     * @default defaultEntityDuplicators
+     */
+    entityDuplicators?: Array<EntityDuplicator<any>>;
+    /**
+     * @description
+     * Defines the strategy used to store and round monetary values.
+     *
+     * @since 2.0.0
+     * @default DefaultMoneyStrategy
+     */
+    moneyStrategy?: MoneyStrategy;
+    /**
+     * @description
+     * Channels get cached in-memory as they are accessed very frequently. This
+     * setting determines how long the cache lives (in ms) until it is considered stale and
+     * refreshed. For multi-instance deployments (e.g. serverless, load-balanced), a
+     * smaller value here will prevent data inconsistencies between instances.
+     *
+     * @since 1.3.0
+     * @default 30000
+     */
+    channelCacheTtl?: number;
+    /**
+     * @description
+     * Zones get cached in-memory as they are accessed very frequently. This
+     * setting determines how long the cache lives (in ms) until it is considered stale and
+     * refreshed. For multi-instance deployments (e.g. serverless, load-balanced), a
+     * smaller value here will prevent data inconsistencies between instances.
+     *
+     * @since 1.3.0
+     * @default 30000
+     */
+    zoneCacheTtl?: number;
+    /**
+     * @description
+     * TaxRates get cached in-memory as they are accessed very frequently. This
+     * setting determines how long the cache lives (in ms) until it is considered stale and
+     * refreshed. For multi-instance deployments (e.g. serverless, load-balanced), a
+     * smaller value here will prevent data inconsistencies between instances.
+     *
+     * @since 1.9.0
+     * @default 30000
+     */
+    taxRateCacheTtl?: number;
+    /**
+     * @description
+     * Allows the metadata of the built-in TypeORM entities to be manipulated. This allows you
+     * to do things like altering data types, adding indices etc. This is an advanced feature
+     * which should be used with some caution as it will result in DB schema changes. For examples
+     * see {@link EntityMetadataModifier}.
+     *
+     * @since 1.6.0
+     * @default []
+     */
+    metadataModifiers?: EntityMetadataModifier[];
+}
+
+/**
+ * @description
+ * Options relating to system functions.
+ *
+ * @since 1.6.0
+ * @docsCategory configuration
+ */
+export interface SystemOptions {
+    /**
+     * @description
+     * Defines an array of {@link HealthCheckStrategy} instances which are used by the `/health` endpoint to verify
+     * that any critical systems which the Vendure server depends on are also healthy.
+     *
+     * @default [TypeORMHealthCheckStrategy]
+     * @since 1.6.0
+     */
+    healthChecks?: HealthCheckStrategy[];
+    /**
+     * @description
+     * Defines an array of {@link ErrorHandlerStrategy} instances which are used to define logic to be executed
+     * when an error occurs, either on the server or the worker.
+     *
+     * @default []
+     * @since 2.2.0
+     */
+    errorHandlers?: ErrorHandlerStrategy[];
+    /**
+     * @description
+     * Defines the underlying method used to store cache key-value pairs which powers the
+     * {@link CacheService}.
+     *
+     * @since 3.1.0
+     * @default InMemoryCacheStrategy
+     */
+    cacheStrategy?: CacheStrategy;
 }
 
 /**
  * @description
  * All possible configuration options are defined by the
- * [`VendureConfig`](https://github.com/vendure-ecommerce/vendure/blob/master/server/src/config/vendure-config.ts) interface.
+ * [`VendureConfig`](https://github.com/vendure-ecommerce/vendure/blob/master/packages/core/src/config/vendure-config.ts) interface.
  *
  * @docsCategory configuration
  * */
@@ -735,7 +1123,7 @@ export interface VendureConfig {
      * See the [TypeORM documentation](https://typeorm.io/#/connection-options) for a
      * full description of all available options.
      */
-    dbConnectionOptions: ConnectionOptions;
+    dbConnectionOptions: DataSourceOptions;
     /**
      * @description
      * The token for the default channel. If not specified, a token
@@ -758,9 +1146,11 @@ export interface VendureConfig {
      * entities via the API. The default uses a simple auto-increment integer
      * strategy.
      *
+     * @deprecated Use entityOptions.entityIdStrategy instead
      * @default AutoIncrementIdStrategy
      */
     entityIdStrategy?: EntityIdStrategy<any>;
+    entityOptions?: EntityOptions;
     /**
      * @description
      * Configuration settings for data import and export.
@@ -809,14 +1199,16 @@ export interface VendureConfig {
     taxOptions?: TaxOptions;
     /**
      * @description
-     * Configures the Vendure Worker, which is used for long-running background tasks.
-     */
-    workerOptions?: WorkerOptions;
-    /**
-     * @description
      * Configures how the job queue is persisted and processed.
      */
     jobQueueOptions?: JobQueueOptions;
+    /**
+     * @description
+     * Configures system options
+     *
+     * @since 1.6.0
+     */
+    systemOptions?: SystemOptions;
 }
 
 /**
@@ -830,11 +1222,16 @@ export interface RuntimeVendureConfig extends Required<VendureConfig> {
     apiOptions: Required<ApiOptions>;
     assetOptions: Required<AssetOptions>;
     authOptions: Required<AuthOptions>;
+    catalogOptions: Required<CatalogOptions>;
     customFields: Required<CustomFields>;
+    entityOptions: Required<Omit<EntityOptions, 'entityIdStrategy'>> & EntityOptions;
     importExportOptions: Required<ImportExportOptions>;
-    orderOptions: Required<OrderOptions>;
-    workerOptions: Required<WorkerOptions>;
     jobQueueOptions: Required<JobQueueOptions>;
+    orderOptions: Required<OrderOptions>;
+    promotionOptions: Required<PromotionOptions>;
+    shippingOptions: Required<ShippingOptions>;
+    taxOptions: Required<TaxOptions>;
+    systemOptions: Required<SystemOptions>;
 }
 
 type DeepPartialSimple<T> = {
@@ -843,10 +1240,10 @@ type DeepPartialSimple<T> = {
         | (T[P] extends Array<infer U>
               ? Array<DeepPartialSimple<U>>
               : T[P] extends ReadonlyArray<infer X>
-              ? ReadonlyArray<DeepPartialSimple<X>>
-              : T[P] extends Type<any>
-              ? T[P]
-              : DeepPartialSimple<T[P]>);
+                ? ReadonlyArray<DeepPartialSimple<X>>
+                : T[P] extends Type<any>
+                  ? T[P]
+                  : DeepPartialSimple<T[P]>);
 };
 
 export type PartialVendureConfig = DeepPartialSimple<VendureConfig>;

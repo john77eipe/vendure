@@ -8,15 +8,16 @@ export const minimumOrderAmount = new PromotionCondition({
     args: {
         amount: {
             type: 'int',
+            defaultValue: 100,
             ui: { component: 'currency-form-input' },
         },
-        taxInclusive: { type: 'boolean' },
+        taxInclusive: { type: 'boolean', defaultValue: false },
     },
     check(ctx, order, args) {
         if (args.taxInclusive) {
-            return order.subTotal >= args.amount;
+            return order.subTotalWithTax >= args.amount;
         } else {
-            return order.subTotalBeforeTax >= args.amount;
+            return order.subTotal >= args.amount;
         }
     },
     priorityValue: 10,

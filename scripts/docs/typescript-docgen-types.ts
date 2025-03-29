@@ -13,6 +13,8 @@ export interface MemberInfo {
     type: string;
     fullText: string;
     modifiers: string[];
+    since: string | undefined;
+    experimental: boolean;
 }
 
 export interface PropertyInfo extends MemberInfo {
@@ -27,7 +29,7 @@ export interface MethodInfo extends MemberInfo {
 
 export interface DocsPage {
     title: string;
-    category: string;
+    category: string[];
     declarations: ParsedDeclaration[];
     fileName: string;
 }
@@ -42,6 +44,8 @@ export interface DeclarationInfo {
     category: string;
     description: string;
     page: string | undefined;
+    since: string | undefined;
+    experimental: boolean;
 }
 
 export interface InterfaceInfo extends DeclarationInfo {

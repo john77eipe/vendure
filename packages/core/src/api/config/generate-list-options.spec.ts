@@ -1,7 +1,13 @@
-import { buildSchema, printType } from 'graphql';
+// Using require right now to force the commonjs version of GraphQL to be used
+// when running vitest tests. See https://github.com/vitejs/vite/issues/7879
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+import { describe, expect, it } from 'vitest';
 
 import { generateListOptions } from './generate-list-options';
-// tslint:disable:no-non-null-assertion
+
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const { buildSchema, printType } = require('graphql');
+/* eslint-disable @typescript-eslint/no-non-null-assertion */
 
 describe('generateListOptions()', () => {
     const COMMON_TYPES = `
@@ -21,6 +27,8 @@ describe('generateListOptions()', () => {
         ASC
         DESC
     }
+
+    input IDOperators { dummy: String }
 
     input StringOperators { dummy: String }
 
@@ -61,14 +69,21 @@ describe('generateListOptions()', () => {
                input PersonListOptions
            `;
 
-        const result = generateListOptions(buildSchema(input));
+        const result = generateListOptions(input);
 
         expect(printType(result.getType('PersonListOptions')!)).toBe(
             removeLeadingWhitespace(`
                    input PersonListOptions {
+                     """Skips the first n results, for use in pagination"""
                      skip: Int
+
+                     """Takes n results, for use in pagination"""
                      take: Int
+
+                     """Specifies which properties to sort the results by"""
                      sort: PersonSortParameter
+
+                     """Allows the results to be filtered"""
                      filter: PersonFilterParameter
                    }`),
         );
@@ -86,6 +101,8 @@ describe('generateListOptions()', () => {
                    input PersonFilterParameter {
                      name: StringOperators
                      age: NumberOperators
+                     _and: [PersonFilterParameter!]
+                     _or: [PersonFilterParameter!]
                    }`),
         );
     });
@@ -144,6 +161,8 @@ describe('generateListOptions()', () => {
                      admin: BooleanOperators
                      score: NumberOperators
                      personType: StringOperators
+                     _and: [PersonFilterParameter!]
+                     _or: [PersonFilterParameter!]
                    }`),
         );
     });
@@ -165,9 +184,16 @@ describe('generateListOptions()', () => {
         expect(printType(result.getType('PersonListOptions')!)).toBe(
             removeLeadingWhitespace(`
                     input PersonListOptions {
+                      """Skips the first n results, for use in pagination"""
                       skip: Int
+
+                      """Takes n results, for use in pagination"""
                       take: Int
+
+                      """Specifies which properties to sort the results by"""
                       sort: PersonSortParameter
+
+                      """Allows the results to be filtered"""
                       filter: PersonFilterParameter
                     }`),
         );
@@ -199,11 +225,19 @@ describe('generateListOptions()', () => {
         expect(printType(result.getType('PersonListOptions')!)).toBe(
             removeLeadingWhitespace(`
                     input PersonListOptions {
-                      skip: Int
-                      take: Int
-                      sort: PersonSortParameter
-                      filter: PersonFilterParameter
                       categoryId: ID
+
+                      """Skips the first n results, for use in pagination"""
+                      skip: Int
+
+                      """Takes n results, for use in pagination"""
+                      take: Int
+
+                      """Specifies which properties to sort the results by"""
+                      sort: PersonSortParameter
+
+                      """Allows the results to be filtered"""
+                      filter: PersonFilterParameter
                     }`),
         );
 
@@ -246,7 +280,10 @@ describe('generateListOptions()', () => {
         expect(printType(result.getType('PersonFilterParameter')!)).toBe(
             removeLeadingWhitespace(`
                    input PersonFilterParameter {
+                     id: IDOperators
                      name: StringOperators
+                     _and: [PersonFilterParameter!]
+                     _or: [PersonFilterParameter!]
                    }`),
         );
     });
@@ -282,9 +319,16 @@ describe('generateListOptions()', () => {
         expect(printType(result.getType('OrderListOptions')!)).toBe(
             removeLeadingWhitespace(`
                    input OrderListOptions {
+                     """Skips the first n results, for use in pagination"""
                      skip: Int
+
+                     """Takes n results, for use in pagination"""
                      take: Int
+
+                     """Specifies which properties to sort the results by"""
                      sort: OrderSortParameter
+
+                     """Allows the results to be filtered"""
                      filter: OrderFilterParameter
                    }`),
         );
@@ -299,7 +343,10 @@ describe('generateListOptions()', () => {
         expect(printType(result.getType('OrderFilterParameter')!)).toBe(
             removeLeadingWhitespace(`
                    input OrderFilterParameter {
+                     id: IDOperators
                      code: StringOperators
+                     _and: [OrderFilterParameter!]
+                     _or: [OrderFilterParameter!]
                    }`),
         );
     });

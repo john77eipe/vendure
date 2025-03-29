@@ -6,32 +6,50 @@ export const TEST_ORDER_FRAGMENT = gql`
         code
         state
         active
+        subTotal
+        subTotalWithTax
+        shipping
+        shippingWithTax
         total
+        totalWithTax
+        currencyCode
         couponCodes
-        adjustments {
+        discounts {
             adjustmentSource
             amount
+            amountWithTax
             description
             type
         }
         lines {
             id
             quantity
+            linePrice
+            linePriceWithTax
+            unitPrice
+            unitPriceWithTax
+            unitPriceChangeSinceAdded
+            unitPriceWithTaxChangeSinceAdded
+            discountedUnitPriceWithTax
+            proratedUnitPriceWithTax
             productVariant {
                 id
             }
-            adjustments {
+            discounts {
                 adjustmentSource
                 amount
+                amountWithTax
                 description
                 type
             }
         }
-        shipping
-        shippingMethod {
-            id
-            code
-            description
+        shippingLines {
+            priceWithTax
+            shippingMethod {
+                id
+                code
+                description
+            }
         }
         customer {
             id
@@ -57,22 +75,33 @@ export const UPDATED_ORDER_FRAGMENT = gql`
         state
         active
         total
+        totalWithTax
+        currencyCode
         lines {
             id
             quantity
             productVariant {
                 id
             }
-            adjustments {
+            unitPrice
+            unitPriceWithTax
+            linePrice
+            linePriceWithTax
+            featuredAsset {
+                id
+            }
+            discounts {
                 adjustmentSource
                 amount
+                amountWithTax
                 description
                 type
             }
         }
-        adjustments {
+        discounts {
             adjustmentSource
             amount
+            amountWithTax
             description
             type
         }
@@ -93,6 +122,9 @@ export const ADD_ITEM_TO_ORDER = gql`
                     ...UpdatedOrder
                 }
             }
+            ... on OrderInterceptorError {
+                interceptorError
+            }
         }
     }
     ${UPDATED_ORDER_FRAGMENT}
@@ -104,10 +136,8 @@ export const SEARCH_PRODUCTS_SHOP = gql`
             items {
                 productId
                 productName
-                productPreview
                 productVariantId
                 productVariantName
-                productVariantPreview
                 sku
                 collectionIds
                 price {
@@ -133,6 +163,9 @@ export const REGISTER_ACCOUNT = gql`
                 errorCode
                 message
             }
+            ... on PasswordValidationError {
+                validationErrorMessage
+            }
         }
     }
 `;
@@ -156,6 +189,9 @@ export const VERIFY_EMAIL = gql`
             ... on ErrorResult {
                 errorCode
                 message
+            }
+            ... on PasswordValidationError {
+                validationErrorMessage
             }
         }
     }
@@ -195,6 +231,9 @@ export const RESET_PASSWORD = gql`
             ... on ErrorResult {
                 errorCode
                 message
+            }
+            ... on PasswordValidationError {
+                validationErrorMessage
             }
         }
     }
@@ -300,9 +339,10 @@ export const GET_ACTIVE_ORDER_WITH_PRICE_DATA = gql`
     query GetActiveOrderWithPriceData {
         activeOrder {
             id
-            subTotalBeforeTax
             subTotal
-            totalBeforeTax
+            subTotalWithTax
+            total
+            totalWithTax
             total
             lines {
                 id
@@ -312,18 +352,13 @@ export const GET_ACTIVE_ORDER_WITH_PRICE_DATA = gql`
                 linePrice
                 lineTax
                 linePriceWithTax
-                items {
-                    id
-                    unitPrice
-                    unitPriceWithTax
+                taxLines {
                     taxRate
-                }
-                adjustments {
-                    amount
-                    type
+                    description
                 }
             }
             taxSummary {
+                description
                 taxRate
                 taxBase
                 taxTotal
@@ -340,6 +375,9 @@ export const ADJUST_ITEM_QUANTITY = gql`
                 errorCode
                 message
             }
+            ... on OrderInterceptorError {
+                interceptorError
+            }
         }
     }
     ${TEST_ORDER_FRAGMENT}
@@ -353,6 +391,9 @@ export const REMOVE_ITEM_FROM_ORDER = gql`
                 errorCode
                 message
             }
+            ... on OrderInterceptorError {
+                interceptorError
+            }
         }
     }
     ${TEST_ORDER_FRAGMENT}
@@ -362,6 +403,7 @@ export const GET_ELIGIBLE_SHIPPING_METHODS = gql`
     query GetShippingMethods {
         eligibleShippingMethods {
             id
+            code
             price
             name
             description
@@ -370,7 +412,7 @@ export const GET_ELIGIBLE_SHIPPING_METHODS = gql`
 `;
 
 export const SET_SHIPPING_METHOD = gql`
-    mutation SetShippingMethod($id: ID!) {
+    mutation SetShippingMethod($id: [ID!]!) {
         setOrderShippingMethod(shippingMethodId: $id) {
             ...TestOrderFragment
             ... on ErrorResult {
@@ -405,6 +447,9 @@ export const SET_CUSTOMER = gql`
                 errorCode
                 message
             }
+            ... on GuestCheckoutError {
+                errorDetail
+            }
         }
     }
     ${ACTIVE_ORDER_CUSTOMER}
@@ -413,6 +458,15 @@ export const SET_CUSTOMER = gql`
 export const GET_ORDER_BY_CODE = gql`
     query GetOrderByCode($code: String!) {
         orderByCode(code: $code) {
+            ...TestOrderFragment
+        }
+    }
+    ${TEST_ORDER_FRAGMENT}
+`;
+
+export const GET_ORDER_SHOP = gql`
+    query GetOrderShop($id: ID!) {
+        order(id: $id) {
             ...TestOrderFragment
         }
     }
@@ -457,40 +511,85 @@ export const TRANSITION_TO_STATE = gql`
     ${TEST_ORDER_FRAGMENT}
 `;
 
+export const ORDER_WITH_ADDRESSES_FRAGMENT = gql`
+    fragment OrderWithAddresses on Order {
+        lines {
+            id
+        }
+        shippingAddress {
+            fullName
+            company
+            streetLine1
+            streetLine2
+            city
+            province
+            postalCode
+            country
+            phoneNumber
+        }
+        billingAddress {
+            fullName
+            company
+            streetLine1
+            streetLine2
+            city
+            province
+            postalCode
+            country
+            phoneNumber
+        }
+    }
+`;
+
 export const SET_SHIPPING_ADDRESS = gql`
     mutation SetShippingAddress($input: CreateAddressInput!) {
         setOrderShippingAddress(input: $input) {
-            shippingAddress {
-                fullName
-                company
-                streetLine1
-                streetLine2
-                city
-                province
-                postalCode
-                country
-                phoneNumber
+            ...OrderWithAddresses
+            ... on ErrorResult {
+                errorCode
+                message
             }
         }
     }
+    ${ORDER_WITH_ADDRESSES_FRAGMENT}
 `;
 
 export const SET_BILLING_ADDRESS = gql`
     mutation SetBillingAddress($input: CreateAddressInput!) {
         setOrderBillingAddress(input: $input) {
-            billingAddress {
-                fullName
-                company
-                streetLine1
-                streetLine2
-                city
-                province
-                postalCode
-                country
-                phoneNumber
+            ...OrderWithAddresses
+            ... on ErrorResult {
+                errorCode
+                message
             }
         }
     }
+    ${ORDER_WITH_ADDRESSES_FRAGMENT}
+`;
+
+export const UNSET_SHIPPING_ADDRESS = gql`
+    mutation UnsetShippingAddress {
+        unsetOrderShippingAddress {
+            ...OrderWithAddresses
+            ... on ErrorResult {
+                errorCode
+                message
+            }
+        }
+    }
+    ${ORDER_WITH_ADDRESSES_FRAGMENT}
+`;
+export const UNSET_BILLING_ADDRESS = gql`
+    mutation UnsetBillingAddress {
+        unsetOrderBillingAddress {
+            ...OrderWithAddresses
+            ... on ErrorResult {
+                errorCode
+                message
+            }
+        }
+    }
+    ${ORDER_WITH_ADDRESSES_FRAGMENT}
 `;
 
 export const TEST_ORDER_WITH_PAYMENTS_FRAGMENT = gql`
@@ -534,6 +633,9 @@ export const ADD_PAYMENT = gql`
             ... on OrderStateTransitionError {
                 transitionError
             }
+            ... on IneligiblePaymentMethodError {
+                eligibilityCheckerMessage
+            }
         }
     }
     ${TEST_ORDER_WITH_PAYMENTS_FRAGMENT}
@@ -565,6 +667,32 @@ export const GET_ORDER_BY_CODE_WITH_PAYMENTS = gql`
     ${TEST_ORDER_WITH_PAYMENTS_FRAGMENT}
 `;
 
+export const GET_ACTIVE_ORDER_CUSTOMER_WITH_ITEM_FULFILLMENTS = gql`
+    query GetActiveCustomerOrderWithItemFulfillments {
+        activeCustomer {
+            orders(
+                options: { skip: 0, take: 5, sort: { createdAt: DESC }, filter: { active: { eq: false } } }
+            ) {
+                totalItems
+                items {
+                    id
+                    code
+                    state
+                    lines {
+                        id
+                    }
+                    fulfillments {
+                        id
+                        state
+                        method
+                        trackingCode
+                    }
+                }
+            }
+        }
+    }
+`;
+
 export const GET_NEXT_STATES = gql`
     query GetNextOrderStates {
         nextOrderStates
@@ -592,6 +720,21 @@ export const GET_ACTIVE_ORDER_ORDERS = gql`
                     items {
                         id
                     }
+                }
+            }
+        }
+    }
+`;
+
+export const GET_ACTIVE_CUSTOMER_ORDERS = gql`
+    query GetActiveCustomerOrders {
+        activeCustomer {
+            id
+            orders {
+                totalItems
+                items {
+                    id
+                    state
                 }
             }
         }
@@ -631,4 +774,63 @@ export const REMOVE_ALL_ORDER_LINES = gql`
         }
     }
     ${TEST_ORDER_FRAGMENT}
+`;
+
+export const GET_ELIGIBLE_PAYMENT_METHODS = gql`
+    query GetEligiblePaymentMethods {
+        eligiblePaymentMethods {
+            id
+            code
+            eligibilityMessage
+            isEligible
+        }
+    }
+`;
+
+export const GET_PRODUCT_WITH_STOCK_LEVEL = gql`
+    query GetProductStockLevel($id: ID!) {
+        product(id: $id) {
+            id
+            variants {
+                id
+                stockLevel
+            }
+        }
+    }
+`;
+
+export const GET_ACTIVE_CUSTOMER_WITH_ORDERS_PRODUCT_SLUG = gql`
+    query GetActiveCustomerWithOrdersProductSlug($options: OrderListOptions) {
+        activeCustomer {
+            orders(options: $options) {
+                items {
+                    lines {
+                        productVariant {
+                            product {
+                                slug
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+`;
+export const GET_ACTIVE_CUSTOMER_WITH_ORDERS_PRODUCT_PRICE = gql`
+    query GetActiveCustomerWithOrdersProductPrice($options: OrderListOptions) {
+        activeCustomer {
+            orders(options: $options) {
+                items {
+                    lines {
+                        linePrice
+                        productVariant {
+                            id
+                            name
+                            price
+                        }
+                    }
+                }
+            }
+        }
+    }
 `;

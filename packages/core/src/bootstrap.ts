@@ -1,10 +1,13 @@
-import { INestApplication, INestMicroservice } from '@nestjs/common';
+import { DynamicModule, INestApplication, INestApplicationContext } from '@nestjs/common';
+import { NestApplicationContextOptions } from '@nestjs/common/interfaces/nest-application-context-options.interface';
+import { NestApplicationOptions } from '@nestjs/common/interfaces/nest-application-options.interface';
 import { NestFactory } from '@nestjs/core';
-import { TcpClientOptions, Transport } from '@nestjs/microservices';
 import { getConnectionToken } from '@nestjs/typeorm';
+import { DEFAULT_COOKIE_NAME } from '@vendure/common/lib/shared-constants';
 import { Type } from '@vendure/common/lib/shared-types';
 import cookieSession = require('cookie-session');
-import { Connection, ConnectionOptions, EntitySubscriberInterface } from 'typeorm';
+import { satisfies } from 'semver';
+import { Connection, DataSourceOptions, EntitySubscriberInterface } from 'typeorm';
 
 import { InternalServerError } from './common/error/errors';
 import { getConfig, setConfig } from './config/config-helpers';
@@ -14,143 +17,234 @@ import { RuntimeVendureConfig, VendureConfig } from './config/vendure-config';
 import { Administrator } from './entity/administrator/administrator.entity';
 import { coreEntitiesMap } from './entity/entities';
 import { registerCustomEntityFields } from './entity/register-custom-entity-fields';
+import { runEntityMetadataModifiers } from './entity/run-entity-metadata-modifiers';
 import { setEntityIdStrategy } from './entity/set-entity-id-strategy';
+import { setMoneyStrategy } from './entity/set-money-strategy';
 import { validateCustomFieldsConfig } from './entity/validate-custom-fields-config';
-import { getConfigurationFunction, getEntitiesFromPlugins } from './plugin/plugin-metadata';
-import { getProxyMiddlewareCliGreetings } from './plugin/plugin-utils';
-import { BeforeVendureBootstrap, BeforeVendureWorkerBootstrap } from './plugin/vendure-plugin';
+import { getCompatibility, getConfigurationFunction, getEntitiesFromPlugins } from './plugin/plugin-metadata';
+import { getPluginStartupMessages } from './plugin/plugin-utils';
+import { setProcessContext } from './process-context/process-context';
+import { VENDURE_VERSION } from './version';
+import { VendureWorker } from './worker/vendure-worker';
 
 export type VendureBootstrapFunction = (config: VendureConfig) => Promise<INestApplication>;
+
+/**
+ * @description
+ * Additional options that can be used to configure the bootstrap process of the
+ * Vendure server.
+ *
+ * @since 2.2.0
+ * @docsCategory common
+ * @docsPage bootstrap
+ */
+export interface BootstrapOptions {
+    /**
+     * @description
+     * These options get passed directly to the `NestFactory.create()` method.
+     */
+    nestApplicationOptions?: NestApplicationOptions;
+    /**
+     * @description
+     * By default, if a plugin specifies a compatibility range which does not include the current
+     * Vendure version, the bootstrap process will fail. This option allows you to ignore compatibility
+     * errors for specific plugins.
+     *
+     * This setting should be used with caution, only if you are sure that the plugin will still
+     * work as expected with the current version of Vendure.
+     *
+     * @example
+     * ```ts
+     * import { bootstrap } from '\@vendure/core';
+     * import { config } from './vendure-config';
+     * import { MyPlugin } from './plugins/my-plugin';
+     *
+     * bootstrap(config, {
+     *  ignoreCompatibilityErrorsForPlugins: [MyPlugin],
+     * });
+     * ```
+     *
+     * @default []
+     * @since 3.1.0
+     */
+    ignoreCompatibilityErrorsForPlugins?: Array<DynamicModule | Type<any>>;
+}
+
+/**
+ * @description
+ * Additional options that can be used to configure the bootstrap process of the
+ * Vendure worker.
+ *
+ * @since 2.2.0
+ * @docsCategory worker
+ * @docsPage bootstrapWorker
+ */
+export interface BootstrapWorkerOptions {
+    /**
+     * @description
+     * These options get passed directly to the `NestFactory.createApplicationContext` method.
+     */
+    nestApplicationContextOptions?: NestApplicationContextOptions;
+    /**
+     * @description
+     * See the `ignoreCompatibilityErrorsForPlugins` option in {@link BootstrapOptions}.
+     *
+     * @default []
+     * @since 3.1.0
+     */
+    ignoreCompatibilityErrorsForPlugins?: Array<DynamicModule | Type<any>>;
+}
 
 /**
  * @description
  * Bootstraps the Vendure server. This is the entry point to the application.
  *
  * @example
- * ```TypeScript
+ * ```ts
  * import { bootstrap } from '\@vendure/core';
  * import { config } from './vendure-config';
  *
  * bootstrap(config).catch(err => {
- *     console.log(err);
+ *   console.log(err);
+ *   process.exit(1);
  * });
  * ```
- * @docsCategory
+ *
+ * ### Passing additional options
+ *
+ * Since v2.2.0, you can pass additional options to the NestJs application via the `options` parameter.
+ * For example, to integrate with the [Nest Devtools](https://docs.nestjs.com/devtools/overview), you need to
+ * pass the `snapshot` option:
+ *
+ * ```ts
+ * import { bootstrap } from '\@vendure/core';
+ * import { config } from './vendure-config';
+ *
+ * bootstrap(config, {
+ *   // highlight-start
+ *   nestApplicationOptions: {
+ *     snapshot: true,
+ *   }
+ *   // highlight-end
+ * }).catch(err => {
+ *   console.log(err);
+ *   process.exit(1);
+ * });
+ * ```
+ *
+ * ### Ignoring compatibility errors for plugins
+ *
+ * Since v3.1.0, you can ignore compatibility errors for specific plugins by passing the `ignoreCompatibilityErrorsForPlugins` option.
+ *
+ * This should be used with caution, only if you are sure that the plugin will still work as expected with the current version of Vendure.
+ *
+ * @example
+ * ```ts
+ * import { bootstrap } from '\@vendure/core';
+ * import { config } from './vendure-config';
+ * import { MyPlugin } from './plugins/my-plugin';
+ *
+ * bootstrap(config, {
+ *   // Let's say that `MyPlugin` is not yet compatible with the current version of Vendure
+ *   // but we know that it will still work as expected, and we are not able to publish
+ *   // a new version of the plugin right now.
+ *   ignoreCompatibilityErrorsForPlugins: [MyPlugin],
+ * });
+ * ```
+ *
+ * @docsCategory common
+ * @docsPage bootstrap
+ * @docsWeight 0
  * */
-export async function bootstrap(userConfig: Partial<VendureConfig>): Promise<INestApplication> {
+export async function bootstrap(
+    userConfig: Partial<VendureConfig>,
+    options?: BootstrapOptions,
+): Promise<INestApplication> {
     const config = await preBootstrapConfig(userConfig);
     Logger.useLogger(config.logger);
     Logger.info(`Bootstrapping Vendure Server (pid: ${process.pid})...`);
+    checkPluginCompatibility(config, options?.ignoreCompatibilityErrorsForPlugins);
 
     // The AppModule *must* be loaded only after the entities have been set in the
     // config, so that they are available when the AppModule decorator is evaluated.
-    // tslint:disable-next-line:whitespace
-    const appModule = await import('./app.module');
-    const { hostname, port, cors } = config.apiOptions;
+    // eslint-disable-next-line
+    const appModule = await import('./app.module.js');
+    setProcessContext('server');
+    const { hostname, port, cors, middleware } = config.apiOptions;
     DefaultLogger.hideNestBoostrapLogs();
     const app = await NestFactory.create(appModule.AppModule, {
         cors,
         logger: new Logger(),
+        ...options?.nestApplicationOptions,
     });
     DefaultLogger.restoreOriginalLogLevel();
     app.useLogger(new Logger());
-    await runBeforeBootstrapHooks(config, app);
-    if (config.authOptions.tokenMethod === 'cookie') {
-        const { sessionSecret, cookieOptions } = config.authOptions;
-        app.use(
-            cookieSession({
-                ...cookieOptions,
-                // TODO: Remove once the deprecated sessionSecret field is removed
-                ...(sessionSecret ? { secret: sessionSecret } : {}),
-            }),
-        );
+    const { tokenMethod } = config.authOptions;
+    const usingCookie =
+        tokenMethod === 'cookie' || (Array.isArray(tokenMethod) && tokenMethod.includes('cookie'));
+    if (usingCookie) {
+        configureSessionCookies(app, config);
     }
+    const earlyMiddlewares = middleware.filter(mid => mid.beforeListen);
+    earlyMiddlewares.forEach(mid => {
+        app.use(mid.route, mid.handler);
+    });
     await app.listen(port, hostname || '');
     app.enableShutdownHooks();
-    if (config.workerOptions.runInMainProcess) {
-        try {
-            const worker = await bootstrapWorkerInternal(config);
-            Logger.warn(`Worker is running in main process. This is not recommended for production.`);
-            Logger.warn(`[VendureConfig.workerOptions.runInMainProcess = true]`);
-            closeWorkerOnAppClose(app, worker);
-        } catch (e) {
-            Logger.error(`Could not start the worker process: ${e.message || e}`, 'Vendure Worker');
-        }
-    }
     logWelcomeMessage(config);
     return app;
 }
 
 /**
  * @description
- * Bootstraps the Vendure worker. Read more about the [Vendure Worker]({{< relref "vendure-worker" >}}) or see the worker-specific options
- * defined in {@link WorkerOptions}.
+ * Bootstraps a Vendure worker. Resolves to a {@link VendureWorker} object containing a reference to the underlying
+ * NestJs [standalone application](https://docs.nestjs.com/standalone-applications) as well as convenience
+ * methods for starting the job queue and health check server.
+ *
+ * Read more about the [Vendure Worker](/guides/developer-guide/worker-job-queue/).
  *
  * @example
- * ```TypeScript
+ * ```ts
  * import { bootstrapWorker } from '\@vendure/core';
  * import { config } from './vendure-config';
  *
- * bootstrapWorker(config).catch(err => {
+ * bootstrapWorker(config)
+ *   .then(worker => worker.startJobQueue())
+ *   .then(worker => worker.startHealthCheckServer({ port: 3020 }))
+ *   .catch(err => {
  *     console.log(err);
- * });
+ *     process.exit(1);
+ *   });
  * ```
  * @docsCategory worker
+ * @docsPage bootstrapWorker
+ * @docsWeight 0
  * */
-export async function bootstrapWorker(userConfig: Partial<VendureConfig>): Promise<INestMicroservice> {
-    if (userConfig.workerOptions && userConfig.workerOptions.runInMainProcess === true) {
-        Logger.useLogger(userConfig.logger || new DefaultLogger());
-        const errorMessage = `Cannot bootstrap worker when "runInMainProcess" is set to true`;
-        Logger.error(errorMessage, 'Vendure Worker');
-        throw new Error(errorMessage);
-    } else {
-        try {
-            const vendureConfig = await preBootstrapConfig(userConfig);
-            return await bootstrapWorkerInternal(vendureConfig);
-        } catch (e) {
-            Logger.error(`Could not start the worker process: ${e.message}`, 'Vendure Worker');
-            throw e;
-        }
-    }
-}
-
-async function bootstrapWorkerInternal(
-    vendureConfig: Readonly<RuntimeVendureConfig>,
-): Promise<INestMicroservice> {
+export async function bootstrapWorker(
+    userConfig: Partial<VendureConfig>,
+    options?: BootstrapWorkerOptions,
+): Promise<VendureWorker> {
+    const vendureConfig = await preBootstrapConfig(userConfig);
     const config = disableSynchronize(vendureConfig);
-    if (!config.workerOptions.runInMainProcess && (config.logger as any).setDefaultContext) {
-        (config.logger as any).setDefaultContext('Vendure Worker');
-    }
+    config.logger.setDefaultContext?.('Vendure Worker');
     Logger.useLogger(config.logger);
     Logger.info(`Bootstrapping Vendure Worker (pid: ${process.pid})...`);
+    checkPluginCompatibility(config, options?.ignoreCompatibilityErrorsForPlugins);
 
-    const workerModule = await import('./worker/worker.module');
+    setProcessContext('worker');
     DefaultLogger.hideNestBoostrapLogs();
-    const workerApp = await NestFactory.createMicroservice(workerModule.WorkerModule, {
-        transport: config.workerOptions.transport,
+
+    const WorkerModule = await import('./worker/worker.module.js').then(m => m.WorkerModule);
+    const workerApp = await NestFactory.createApplicationContext(WorkerModule, {
         logger: new Logger(),
-        options: config.workerOptions.options,
+        ...options?.nestApplicationContextOptions,
     });
     DefaultLogger.restoreOriginalLogLevel();
     workerApp.useLogger(new Logger());
     workerApp.enableShutdownHooks();
     await validateDbTablesForWorker(workerApp);
-    await runBeforeWorkerBootstrapHooks(config, workerApp);
-    // A work-around to correctly handle errors when attempting to start the
-    // microservice server listening.
-    // See https://github.com/nestjs/nest/issues/2777
-    // TODO: Remove if & when the above issue is resolved.
-    await new Promise((resolve, reject) => {
-        const tcpServer = (workerApp as any).server.server;
-        if (tcpServer) {
-            tcpServer.on('error', (e: any) => {
-                reject(e);
-            });
-        }
-        workerApp.listenAsync().then(resolve);
-    });
-    workerWelcomeMessage(config);
-    return workerApp;
+    Logger.info('Vendure Worker is ready');
+    return new VendureWorker(workerApp);
 }
 
 /**
@@ -160,30 +254,75 @@ export async function preBootstrapConfig(
     userConfig: Partial<VendureConfig>,
 ): Promise<Readonly<RuntimeVendureConfig>> {
     if (userConfig) {
-        checkForDeprecatedOptions(userConfig);
-        setConfig(userConfig);
+        await setConfig(userConfig);
     }
 
-    const entities = await getAllEntities(userConfig);
-    const { coreSubscribersMap } = await import('./entity/subscribers');
-    setConfig({
+    const entities = getAllEntities(userConfig);
+    const { coreSubscribersMap } = await import('./entity/subscribers.js');
+    await setConfig({
         dbConnectionOptions: {
             entities,
-            subscribers: Object.values(coreSubscribersMap) as Array<Type<EntitySubscriberInterface>>,
+            subscribers: [
+                ...((userConfig.dbConnectionOptions?.subscribers ?? []) as Array<
+                    Type<EntitySubscriberInterface>
+                >),
+                ...(Object.values(coreSubscribersMap) as Array<Type<EntitySubscriberInterface>>),
+            ],
         },
     });
 
     let config = getConfig();
-    setEntityIdStrategy(config.entityIdStrategy, entities);
+    // The logger is set here so that we are able to log any messages prior to the final
+    // logger (which may depend on config coming from a plugin) being set.
+    Logger.useLogger(config.logger);
+    config = await runPluginConfigurations(config);
+    const entityIdStrategy = config.entityOptions.entityIdStrategy ?? config.entityIdStrategy;
+    setEntityIdStrategy(entityIdStrategy, entities);
+    const moneyStrategy = config.entityOptions.moneyStrategy;
+    setMoneyStrategy(moneyStrategy, entities);
     const customFieldValidationResult = validateCustomFieldsConfig(config.customFields, entities);
     if (!customFieldValidationResult.valid) {
         process.exitCode = 1;
-        throw new Error(`CustomFields config error:\n- ` + customFieldValidationResult.errors.join('\n- '));
+        throw new Error('CustomFields config error:\n- ' + customFieldValidationResult.errors.join('\n- '));
     }
-    config = await runPluginConfigurations(config);
     registerCustomEntityFields(config);
+    await runEntityMetadataModifiers(config);
     setExposedHeaders(config);
     return config;
+}
+
+function checkPluginCompatibility(
+    config: RuntimeVendureConfig,
+    ignoredPlugins: Array<DynamicModule | Type<any>> = [],
+): void {
+    for (const plugin of config.plugins) {
+        const compatibility = getCompatibility(plugin);
+        const pluginName = (plugin as any).name as string;
+        if (!compatibility) {
+            Logger.info(
+                `The plugin "${pluginName}" does not specify a compatibility range, so it is not guaranteed to be compatible with this version of Vendure.`,
+            );
+        } else {
+            if (!satisfies(VENDURE_VERSION, compatibility, { loose: true, includePrerelease: true })) {
+                const compatibilityErrorMessage =
+                    `Plugin "${pluginName}" is not compatible with this version of Vendure. ` +
+                    `It specifies a semver range of "${compatibility}" but the current version is "${VENDURE_VERSION}".`;
+                if (ignoredPlugins.includes(plugin)) {
+                    Logger.warn(
+                        compatibilityErrorMessage +
+                            `However, this plugin has been explicitly marked as ignored using the 'ignoreCompatibilityErrorsForPlugins' bootstrap option,` +
+                            ` so it will be loaded anyway.`,
+                    );
+                    continue;
+                } else {
+                    Logger.error(compatibilityErrorMessage);
+                    throw new InternalServerError(
+                        `Plugin "${pluginName}" is not compatible with this version of Vendure.`,
+                    );
+                }
+            }
+        }
+    }
 }
 
 /**
@@ -193,7 +332,8 @@ async function runPluginConfigurations(config: RuntimeVendureConfig): Promise<Ru
     for (const plugin of config.plugins) {
         const configFn = getConfigurationFunction(plugin);
         if (typeof configFn === 'function') {
-            config = await configFn(config);
+            const result = await configFn(config);
+            Object.assign(config, result);
         }
     }
     return config;
@@ -202,7 +342,7 @@ async function runPluginConfigurations(config: RuntimeVendureConfig): Promise<Ru
 /**
  * Returns an array of core entities and any additional entities defined in plugins.
  */
-export async function getAllEntities(userConfig: Partial<VendureConfig>): Promise<Array<Type<any>>> {
+export function getAllEntities(userConfig: Partial<VendureConfig>): Array<Type<any>> {
     const coreEntities = Object.values(coreEntitiesMap) as Array<Type<any>>;
     const pluginEntities = getEntitiesFromPlugins(userConfig.plugins);
 
@@ -212,7 +352,7 @@ export async function getAllEntities(userConfig: Partial<VendureConfig>): Promis
     // which conflict with existing entities.
     for (const pluginEntity of pluginEntities) {
         if (allEntities.find(e => e.name === pluginEntity.name)) {
-            throw new InternalServerError(`error.entity-name-conflict`, { entityName: pluginEntity.name });
+            throw new InternalServerError('error.entity-name-conflict', { entityName: pluginEntity.name });
         } else {
             allEntities.push(pluginEntity);
         }
@@ -225,7 +365,10 @@ export async function getAllEntities(userConfig: Partial<VendureConfig>): Promis
  * in the CORS options, making sure to preserve any user-configured exposedHeaders.
  */
 function setExposedHeaders(config: Readonly<RuntimeVendureConfig>) {
-    if (config.authOptions.tokenMethod === 'bearer') {
+    const { tokenMethod } = config.authOptions;
+    const isUsingBearerToken =
+        tokenMethod === 'bearer' || (Array.isArray(tokenMethod) && tokenMethod.includes('bearer'));
+    if (isUsingBearerToken) {
         const authTokenHeaderKey = config.authOptions.authTokenHeaderKey;
         const corsOptions = config.apiOptions.cors;
         if (typeof corsOptions !== 'boolean') {
@@ -246,86 +389,27 @@ function setExposedHeaders(config: Readonly<RuntimeVendureConfig>) {
     }
 }
 
-export async function runBeforeBootstrapHooks(config: Readonly<RuntimeVendureConfig>, app: INestApplication) {
-    function hasBeforeBootstrapHook(
-        plugin: any,
-    ): plugin is { beforeVendureBootstrap: BeforeVendureBootstrap } {
-        return typeof plugin.beforeVendureBootstrap === 'function';
-    }
-    for (const plugin of config.plugins) {
-        if (hasBeforeBootstrapHook(plugin)) {
-            await plugin.beforeVendureBootstrap(app);
-        }
-    }
-}
-
-export async function runBeforeWorkerBootstrapHooks(
-    config: Readonly<RuntimeVendureConfig>,
-    worker: INestMicroservice,
-) {
-    function hasBeforeBootstrapHook(
-        plugin: any,
-    ): plugin is { beforeVendureWorkerBootstrap: BeforeVendureWorkerBootstrap } {
-        return typeof plugin.beforeVendureWorkerBootstrap === 'function';
-    }
-    for (const plugin of config.plugins) {
-        if (hasBeforeBootstrapHook(plugin)) {
-            await plugin.beforeVendureWorkerBootstrap(worker);
-        }
-    }
-}
-
-/**
- * Monkey-patches the app's .close() method to also close the worker microservice
- * instance too.
- */
-function closeWorkerOnAppClose(app: INestApplication, worker: INestMicroservice) {
-    // A Nest app is a nested Proxy. By getting the prototype we are
-    // able to access and override the actual close() method.
-    const appPrototype = Object.getPrototypeOf(app);
-    const appClose = appPrototype.close.bind(app);
-    appPrototype.close = async () => {
-        return Promise.all([appClose(), worker.close()]);
-    };
-}
-
-function workerWelcomeMessage(config: VendureConfig) {
-    let transportString = '';
-    let connectionString = '';
-    const transport = (config.workerOptions && config.workerOptions.transport) || Transport.TCP;
-    transportString = ` with ${Transport[transport]} transport`;
-    const options = (config.workerOptions as TcpClientOptions).options;
-    if (options) {
-        const { host, port } = options;
-        connectionString = ` at ${host || 'localhost'}:${port}`;
-    }
-    Logger.info(`Vendure Worker started${transportString}${connectionString}`);
-}
-
 function logWelcomeMessage(config: RuntimeVendureConfig) {
-    let version: string;
-    try {
-        version = require('../package.json').version;
-    } catch (e) {
-        version = ' unknown';
-    }
-    const { port, shopApiPath, adminApiPath } = config.apiOptions;
-    const apiCliGreetings: Array<[string, string]> = [];
-    apiCliGreetings.push(['Shop API', `http://localhost:${port}/${shopApiPath}`]);
-    apiCliGreetings.push(['Admin API', `http://localhost:${port}/${adminApiPath}`]);
-    apiCliGreetings.push(...getProxyMiddlewareCliGreetings(config));
+    const { port, shopApiPath, adminApiPath, hostname } = config.apiOptions;
+    const apiCliGreetings: Array<readonly [string, string]> = [];
+    const pathToUrl = (path: string) => `http://${hostname || 'localhost'}:${port}/${path}`;
+    apiCliGreetings.push(['Shop API', pathToUrl(shopApiPath)]);
+    apiCliGreetings.push(['Admin API', pathToUrl(adminApiPath)]);
+    apiCliGreetings.push(
+        ...getPluginStartupMessages().map(({ label, path }) => [label, pathToUrl(path)] as const),
+    );
     const columnarGreetings = arrangeCliGreetingsInColumns(apiCliGreetings);
-    const title = `Vendure server (v${version}) now running on port ${port}`;
+    const title = `Vendure server (v${VENDURE_VERSION}) now running on port ${port}`;
     const maxLineLength = Math.max(title.length, ...columnarGreetings.map(l => l.length));
     const titlePadLength = title.length < maxLineLength ? Math.floor((maxLineLength - title.length) / 2) : 0;
-    Logger.info(`=`.repeat(maxLineLength));
+    Logger.info('='.repeat(maxLineLength));
     Logger.info(title.padStart(title.length + titlePadLength));
     Logger.info('-'.repeat(maxLineLength).padStart(titlePadLength));
     columnarGreetings.forEach(line => Logger.info(line));
-    Logger.info(`=`.repeat(maxLineLength));
+    Logger.info('='.repeat(maxLineLength));
 }
 
-function arrangeCliGreetingsInColumns(lines: Array<[string, string]>): string[] {
+function arrangeCliGreetingsInColumns(lines: Array<readonly [string, string]>): string[] {
     const columnWidth = Math.max(...lines.map(l => l[0].length)) + 2;
     return lines.map(l => `${(l[0] + ':').padEnd(columnWidth)}${l[1]}`);
 }
@@ -335,11 +419,13 @@ function arrangeCliGreetingsInColumns(lines: Array<[string, string]>): string[] 
  * See: https://github.com/vendure-ecommerce/vendure/issues/152
  */
 function disableSynchronize(userConfig: Readonly<RuntimeVendureConfig>): Readonly<RuntimeVendureConfig> {
-    const config = { ...userConfig };
-    config.dbConnectionOptions = {
-        ...userConfig.dbConnectionOptions,
-        synchronize: false,
-    } as ConnectionOptions;
+    const config = {
+        ...userConfig,
+        dbConnectionOptions: {
+            ...userConfig.dbConnectionOptions,
+            synchronize: false,
+        } as DataSourceOptions,
+    };
     return config;
 }
 
@@ -351,14 +437,14 @@ function disableSynchronize(userConfig: Readonly<RuntimeVendureConfig>): Readonl
  * before allowing the rest of the worker bootstrap to continue.
  * @param worker
  */
-async function validateDbTablesForWorker(worker: INestMicroservice) {
+async function validateDbTablesForWorker(worker: INestApplicationContext) {
     const connection: Connection = worker.get(getConnectionToken());
-    await new Promise(async (resolve, reject) => {
+    await new Promise<void>(async (resolve, reject) => {
         const checkForTables = async (): Promise<boolean> => {
             try {
                 const adminCount = await connection.getRepository(Administrator).count();
                 return 0 < adminCount;
-            } catch (e) {
+            } catch (e: any) {
                 return false;
             }
         };
@@ -381,26 +467,23 @@ async function validateDbTablesForWorker(worker: INestMicroservice) {
             );
             await new Promise(resolve1 => setTimeout(resolve1, pollIntervalMs));
         }
-        reject(`Could not validate DB table structure. Aborting bootstrap.`);
+        reject('Could not validate DB table structure. Aborting bootstrap.');
     });
 }
 
-function checkForDeprecatedOptions(config: Partial<VendureConfig>) {
-    const deprecatedApiOptions = [
-        'hostname',
-        'port',
-        'adminApiPath',
-        'shopApiPath',
-        'channelTokenKey',
-        'cors',
-        'middleware',
-        'apolloServerPlugins',
-    ];
-    const deprecatedOptionsUsed = deprecatedApiOptions.filter(option => config.hasOwnProperty(option));
-    if (deprecatedOptionsUsed.length) {
-        throw new Error(
-            `The following VendureConfig options are deprecated: ${deprecatedOptionsUsed.join(', ')}\n` +
-                `They have been moved to the "apiOptions" object. Please update your configuration.`,
-        );
-    }
+export function configureSessionCookies(
+    app: INestApplication,
+    userConfig: Readonly<RuntimeVendureConfig>,
+): void {
+    const { cookieOptions } = userConfig.authOptions;
+
+    // Globally set the cookie session middleware
+    const cookieName =
+        typeof cookieOptions?.name !== 'string' ? cookieOptions.name?.shop : cookieOptions.name;
+    app.use(
+        cookieSession({
+            ...cookieOptions,
+            name: cookieName ?? DEFAULT_COOKIE_NAME,
+        }),
+    );
 }

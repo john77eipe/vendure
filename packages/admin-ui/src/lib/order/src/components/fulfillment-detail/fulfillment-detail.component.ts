@@ -1,5 +1,7 @@
-import { ChangeDetectionStrategy, Component, Input } from '@angular/core';
-import { OrderDetail } from '@vendure/admin-ui/core';
+import { ChangeDetectionStrategy, Component, Input, OnChanges, OnInit, SimpleChanges } from '@angular/core';
+import { UntypedFormControl, UntypedFormGroup } from '@angular/forms';
+import { CustomFieldConfig, OrderDetailFragment, ServerConfigService } from '@vendure/admin-ui/core';
+import { isObject } from '@vendure/common/lib/shared-utils';
 
 @Component({
     selector: 'vdr-fulfillment-detail',
@@ -7,39 +9,47 @@ import { OrderDetail } from '@vendure/admin-ui/core';
     styleUrls: ['./fulfillment-detail.component.scss'],
     changeDetection: ChangeDetectionStrategy.OnPush,
 })
-export class FulfillmentDetailComponent {
+export class FulfillmentDetailComponent implements OnInit, OnChanges {
     @Input() fulfillmentId: string;
-    @Input() order: OrderDetail.Fragment;
+    @Input() order: OrderDetailFragment;
 
-    get fulfillment(): OrderDetail.Fulfillments | undefined | null {
+    customFieldConfig: CustomFieldConfig[] = [];
+    customFieldFormGroup = new UntypedFormGroup({});
+
+    constructor(private serverConfigService: ServerConfigService) {}
+
+    ngOnInit() {
+        this.customFieldConfig = this.serverConfigService.getCustomFieldsFor('Fulfillment');
+    }
+
+    ngOnChanges(changes: SimpleChanges) {
+        this.buildCustomFieldsFormGroup();
+    }
+
+    get fulfillment(): NonNullable<OrderDetailFragment['fulfillments']>[number] | undefined | null {
         return this.order.fulfillments && this.order.fulfillments.find(f => f.id === this.fulfillmentId);
     }
 
     get items(): Array<{ name: string; quantity: number }> {
-        const itemMap = new Map<string, number>();
-        for (const line of this.order.lines) {
-            for (const item of line.items) {
-                if (item.fulfillment && item.fulfillment.id === this.fulfillmentId) {
-                    const count = itemMap.get(line.productVariant.name);
-                    if (count != null) {
-                        itemMap.set(line.productVariant.name, count + 1);
-                    } else {
-                        itemMap.set(line.productVariant.name, 1);
-                    }
-                }
-            }
-        }
-        return Array.from(itemMap.entries()).map(([name, quantity]) => ({ name, quantity }));
+        return (
+            this.fulfillment?.lines.map(row => ({
+                name: this.order.lines.find(line => line.id === row.orderLineId)?.productVariant.name ?? '',
+                quantity: row.quantity,
+            })) ?? []
+        );
     }
 
-    getCustomFields(): Array<{ key: string; value: any }> {
+    buildCustomFieldsFormGroup() {
         const customFields = (this.fulfillment as any).customFields;
-        if (customFields) {
-            return Object.entries(customFields)
-                .filter(([key]) => key !== '__typename')
-                .map(([key, value]) => ({ key, value: (value as any)?.toString() ?? '-' }));
-        } else {
-            return [];
+        for (const fieldDef of this.serverConfigService.getCustomFieldsFor('Fulfillment')) {
+            this.customFieldFormGroup.addControl(
+                fieldDef.name,
+                new UntypedFormControl(customFields[fieldDef.name]),
+            );
         }
+    }
+
+    customFieldIsObject(customField: unknown) {
+        return Array.isArray(customField) || isObject(customField);
     }
 }

@@ -1,628 +1,1058 @@
-// Jest Snapshot v1, https://goo.gl/fbAQLP
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
 
-exports[`ImportParser parseProducts custom fields 1`] = `
-Array [
-  Object {
-    "product": Object {
-      "assetPaths": Array [],
-      "customFields": Object {
-        "customPage": "grid-view",
-        "keywords": "paper, stretch",
-      },
-      "description": "A great device for stretching paper.",
-      "facets": Array [],
-      "name": "Perfect Paper Stretcher",
-      "optionGroups": Array [
-        Object {
-          "name": "size",
-          "values": Array [
-            "Half Imperial",
-            "Quarter Imperial",
-            "Full Imperial",
+exports[`ImportParser > parseProducts > custom fields 1`] = `
+[
+  {
+    "product": {
+      "assetPaths": [],
+      "facets": [],
+      "optionGroups": [
+        {
+          "translations": [
+            {
+              "languageCode": "en",
+              "name": "size",
+              "values": [
+                "Half Imperial",
+                "Quarter Imperial",
+                "Full Imperial",
+              ],
+            },
           ],
         },
       ],
-      "slug": "perfect-paper-stretcher",
-    },
-    "variants": Array [
-      Object {
-        "assetPaths": Array [],
-        "customFields": Object {
-          "volumetric": "243",
+      "translations": [
+        {
+          "customFields": {
+            "customPage": "grid-view",
+            "keywords": "paper, stretch",
+          },
+          "description": "A great device for stretching paper.",
+          "languageCode": "en",
+          "name": "Perfect Paper Stretcher",
+          "slug": "perfect-paper-stretcher",
         },
-        "facets": Array [],
-        "optionValues": Array [
-          "Half Imperial",
-        ],
+      ],
+    },
+    "variants": [
+      {
+        "assetPaths": [],
+        "facets": [],
         "price": 45.3,
         "sku": "PPS12",
         "stockOnHand": 10,
         "taxCategory": "standard",
         "trackInventory": "FALSE",
-      },
-      Object {
-        "assetPaths": Array [],
-        "customFields": Object {
-          "volumetric": "344",
-        },
-        "facets": Array [],
-        "optionValues": Array [
-          "Quarter Imperial",
+        "translations": [
+          {
+            "customFields": {
+              "volumetric": "243",
+            },
+            "languageCode": "en",
+            "optionValues": [
+              "Half Imperial",
+            ],
+          },
         ],
+      },
+      {
+        "assetPaths": [],
+        "facets": [],
         "price": 32.5,
         "sku": "PPS14",
         "stockOnHand": 10,
         "taxCategory": "standard",
         "trackInventory": "FALSE",
-      },
-      Object {
-        "assetPaths": Array [],
-        "customFields": Object {
-          "volumetric": "656",
-        },
-        "facets": Array [],
-        "optionValues": Array [
-          "Full Imperial",
+        "translations": [
+          {
+            "customFields": {
+              "volumetric": "344",
+            },
+            "languageCode": "en",
+            "optionValues": [
+              "Quarter Imperial",
+            ],
+          },
         ],
+      },
+      {
+        "assetPaths": [],
+        "facets": [],
         "price": 59.5,
         "sku": "PPSF",
         "stockOnHand": 10,
         "taxCategory": "standard",
         "trackInventory": "FALSE",
+        "translations": [
+          {
+            "customFields": {
+              "volumetric": "656",
+            },
+            "languageCode": "en",
+            "optionValues": [
+              "Full Imperial",
+            ],
+          },
+        ],
       },
     ],
   },
 ]
 `;
 
-exports[`ImportParser parseProducts multiple products with multiple variants 1`] = `
-Array [
-  Object {
-    "product": Object {
-      "assetPaths": Array [],
-      "customFields": Object {},
-      "description": "A great device for stretching paper.",
-      "facets": Array [],
-      "name": "Perfect Paper Stretcher",
-      "optionGroups": Array [
-        Object {
-          "name": "size",
-          "values": Array [
-            "Half Imperial",
-            "Quarter Imperial",
-            "Full Imperial",
+exports[`ImportParser > parseProducts > multiple products with multiple variants 1`] = `
+[
+  {
+    "product": {
+      "assetPaths": [],
+      "facets": [],
+      "optionGroups": [
+        {
+          "translations": [
+            {
+              "languageCode": "en",
+              "name": "size",
+              "values": [
+                "Half Imperial",
+                "Quarter Imperial",
+                "Full Imperial",
+              ],
+            },
           ],
         },
       ],
-      "slug": "Perfect-paper-stretcher",
+      "translations": [
+        {
+          "customFields": {},
+          "description": "A great device for stretching paper.",
+          "languageCode": "en",
+          "name": "Perfect Paper Stretcher",
+          "slug": "Perfect-paper-stretcher",
+        },
+      ],
     },
-    "variants": Array [
-      Object {
-        "assetPaths": Array [],
-        "customFields": Object {},
-        "facets": Array [],
-        "optionValues": Array [
-          "Half Imperial",
-        ],
+    "variants": [
+      {
+        "assetPaths": [],
+        "facets": [],
         "price": 45.3,
         "sku": "PPS12",
         "stockOnHand": 10,
         "taxCategory": "standard",
         "trackInventory": "FALSE",
-      },
-      Object {
-        "assetPaths": Array [],
-        "customFields": Object {},
-        "facets": Array [],
-        "optionValues": Array [
-          "Quarter Imperial",
+        "translations": [
+          {
+            "customFields": {},
+            "languageCode": "en",
+            "optionValues": [
+              "Half Imperial",
+            ],
+          },
         ],
+      },
+      {
+        "assetPaths": [],
+        "facets": [],
         "price": 32.5,
         "sku": "PPS14",
         "stockOnHand": 11,
         "taxCategory": "standard",
         "trackInventory": "TRUE",
-      },
-      Object {
-        "assetPaths": Array [],
-        "customFields": Object {},
-        "facets": Array [],
-        "optionValues": Array [
-          "Full Imperial",
+        "translations": [
+          {
+            "customFields": {},
+            "languageCode": "en",
+            "optionValues": [
+              "Quarter Imperial",
+            ],
+          },
         ],
+      },
+      {
+        "assetPaths": [],
+        "facets": [],
         "price": 59.5,
         "sku": "PPSF",
         "stockOnHand": 12,
         "taxCategory": "standard",
         "trackInventory": "FALSE",
+        "translations": [
+          {
+            "customFields": {},
+            "languageCode": "en",
+            "optionValues": [
+              "Full Imperial",
+            ],
+          },
+        ],
       },
     ],
   },
-  Object {
-    "product": Object {
-      "assetPaths": Array [],
-      "customFields": Object {},
-      "description": "Mabef description",
-      "facets": Array [],
-      "name": "Mabef M/02 Studio Easel",
-      "optionGroups": Array [],
-      "slug": "mabef-m02-studio-easel",
+  {
+    "product": {
+      "assetPaths": [],
+      "facets": [],
+      "optionGroups": [],
+      "translations": [
+        {
+          "customFields": {},
+          "description": "Mabef description",
+          "languageCode": "en",
+          "name": "Mabef M/02 Studio Easel",
+          "slug": "mabef-m02-studio-easel",
+        },
+      ],
     },
-    "variants": Array [
-      Object {
-        "assetPaths": Array [],
-        "customFields": Object {},
-        "facets": Array [],
-        "optionValues": Array [],
+    "variants": [
+      {
+        "assetPaths": [],
+        "facets": [],
         "price": 910.7,
         "sku": "M02",
         "stockOnHand": 13,
         "taxCategory": "standard",
         "trackInventory": "TRUE",
+        "translations": [
+          {
+            "customFields": {},
+            "languageCode": "en",
+            "optionValues": [],
+          },
+        ],
       },
     ],
   },
-  Object {
-    "product": Object {
-      "assetPaths": Array [],
-      "customFields": Object {},
-      "description": "Really mega pencils",
-      "facets": Array [],
-      "name": "Giotto Mega Pencils",
-      "optionGroups": Array [
-        Object {
-          "name": "box size",
-          "values": Array [
-            "Box of 8",
-            "Box of 12",
+  {
+    "product": {
+      "assetPaths": [],
+      "facets": [],
+      "optionGroups": [
+        {
+          "translations": [
+            {
+              "languageCode": "en",
+              "name": "box size",
+              "values": [
+                "Box of 8",
+                "Box of 12",
+              ],
+            },
           ],
         },
       ],
-      "slug": "giotto-mega-pencils",
+      "translations": [
+        {
+          "customFields": {},
+          "description": "Really mega pencils",
+          "languageCode": "en",
+          "name": "Giotto Mega Pencils",
+          "slug": "giotto-mega-pencils",
+        },
+      ],
     },
-    "variants": Array [
-      Object {
-        "assetPaths": Array [],
-        "customFields": Object {},
-        "facets": Array [],
-        "optionValues": Array [
-          "Box of 8",
-        ],
+    "variants": [
+      {
+        "assetPaths": [],
+        "facets": [],
         "price": 4.16,
         "sku": "225400",
         "stockOnHand": 14,
         "taxCategory": "standard",
         "trackInventory": "FALSE",
-      },
-      Object {
-        "assetPaths": Array [],
-        "customFields": Object {},
-        "facets": Array [],
-        "optionValues": Array [
-          "Box of 12",
+        "translations": [
+          {
+            "customFields": {},
+            "languageCode": "en",
+            "optionValues": [
+              "Box of 8",
+            ],
+          },
         ],
+      },
+      {
+        "assetPaths": [],
+        "facets": [],
         "price": 6.24,
         "sku": "225600",
         "stockOnHand": 15,
         "taxCategory": "standard",
         "trackInventory": "TRUE",
+        "translations": [
+          {
+            "customFields": {},
+            "languageCode": "en",
+            "optionValues": [
+              "Box of 12",
+            ],
+          },
+        ],
       },
     ],
   },
-  Object {
-    "product": Object {
-      "assetPaths": Array [],
-      "customFields": Object {},
-      "description": "Keeps the paint off the clothes",
-      "facets": Array [],
-      "name": "Artists Smock",
-      "optionGroups": Array [
-        Object {
-          "name": "size",
-          "values": Array [
-            "small",
-            "large",
+  {
+    "product": {
+      "assetPaths": [],
+      "facets": [],
+      "optionGroups": [
+        {
+          "translations": [
+            {
+              "languageCode": "en",
+              "name": "size",
+              "values": [
+                "small",
+                "large",
+              ],
+            },
           ],
         },
-        Object {
-          "name": "colour",
-          "values": Array [
-            "beige",
-            "navy",
+        {
+          "translations": [
+            {
+              "languageCode": "en",
+              "name": "colour",
+              "values": [
+                "beige",
+                "navy",
+              ],
+            },
           ],
         },
       ],
-      "slug": "artists-smock",
+      "translations": [
+        {
+          "customFields": {},
+          "description": "Keeps the paint off the clothes",
+          "languageCode": "en",
+          "name": "Artists Smock",
+          "slug": "artists-smock",
+        },
+      ],
     },
-    "variants": Array [
-      Object {
-        "assetPaths": Array [],
-        "customFields": Object {},
-        "facets": Array [],
-        "optionValues": Array [
-          "small",
-          "beige",
-        ],
+    "variants": [
+      {
+        "assetPaths": [],
+        "facets": [],
         "price": 11.99,
         "sku": "10112",
         "stockOnHand": 16,
         "taxCategory": "standard",
         "trackInventory": "FALSE",
-      },
-      Object {
-        "assetPaths": Array [],
-        "customFields": Object {},
-        "facets": Array [],
-        "optionValues": Array [
-          "large",
-          "beige",
+        "translations": [
+          {
+            "customFields": {},
+            "languageCode": "en",
+            "optionValues": [
+              "small",
+              "beige",
+            ],
+          },
         ],
+      },
+      {
+        "assetPaths": [],
+        "facets": [],
         "price": 11.99,
         "sku": "10113",
         "stockOnHand": 17,
         "taxCategory": "standard",
         "trackInventory": "TRUE",
-      },
-      Object {
-        "assetPaths": Array [],
-        "customFields": Object {},
-        "facets": Array [],
-        "optionValues": Array [
-          "small",
-          "navy",
+        "translations": [
+          {
+            "customFields": {},
+            "languageCode": "en",
+            "optionValues": [
+              "large",
+              "beige",
+            ],
+          },
         ],
+      },
+      {
+        "assetPaths": [],
+        "facets": [],
         "price": 11.99,
         "sku": "10114",
         "stockOnHand": 18,
         "taxCategory": "standard",
         "trackInventory": "FALSE",
-      },
-      Object {
-        "assetPaths": Array [],
-        "customFields": Object {},
-        "facets": Array [],
-        "optionValues": Array [
-          "large",
-          "navy",
+        "translations": [
+          {
+            "customFields": {},
+            "languageCode": "en",
+            "optionValues": [
+              "small",
+              "navy",
+            ],
+          },
         ],
+      },
+      {
+        "assetPaths": [],
+        "facets": [],
         "price": 11.99,
         "sku": "10115",
         "stockOnHand": 19,
         "taxCategory": "standard",
         "trackInventory": "TRUE",
+        "translations": [
+          {
+            "customFields": {},
+            "languageCode": "en",
+            "optionValues": [
+              "large",
+              "navy",
+            ],
+          },
+        ],
       },
     ],
   },
 ]
 `;
 
-exports[`ImportParser parseProducts single product with a multiple variants 1`] = `
-Array [
-  Object {
-    "product": Object {
-      "assetPaths": Array [],
-      "customFields": Object {},
-      "description": "A great device for stretching paper.",
-      "facets": Array [],
-      "name": "Perfect Paper Stretcher",
-      "optionGroups": Array [
-        Object {
-          "name": "size",
-          "values": Array [
-            "Half Imperial",
-            "Quarter Imperial",
-            "Full Imperial",
+exports[`ImportParser > parseProducts > single product with a multiple variants 1`] = `
+[
+  {
+    "product": {
+      "assetPaths": [],
+      "facets": [],
+      "optionGroups": [
+        {
+          "translations": [
+            {
+              "languageCode": "en",
+              "name": "size",
+              "values": [
+                "Half Imperial",
+                "Quarter Imperial",
+                "Full Imperial",
+              ],
+            },
           ],
         },
       ],
-      "slug": "perfect-paper-stretcher",
+      "translations": [
+        {
+          "customFields": {},
+          "description": "A great device for stretching paper.",
+          "languageCode": "en",
+          "name": "Perfect Paper Stretcher",
+          "slug": "perfect-paper-stretcher",
+        },
+      ],
     },
-    "variants": Array [
-      Object {
-        "assetPaths": Array [],
-        "customFields": Object {},
-        "facets": Array [],
-        "optionValues": Array [
-          "Half Imperial",
-        ],
+    "variants": [
+      {
+        "assetPaths": [],
+        "facets": [],
         "price": 45.3,
         "sku": "PPS12",
         "stockOnHand": 10,
         "taxCategory": "standard",
         "trackInventory": "FALSE",
-      },
-      Object {
-        "assetPaths": Array [],
-        "customFields": Object {},
-        "facets": Array [],
-        "optionValues": Array [
-          "Quarter Imperial",
+        "translations": [
+          {
+            "customFields": {},
+            "languageCode": "en",
+            "optionValues": [
+              "Half Imperial",
+            ],
+          },
         ],
+      },
+      {
+        "assetPaths": [],
+        "facets": [],
         "price": 32.5,
         "sku": "PPS14",
         "stockOnHand": 10,
         "taxCategory": "standard",
         "trackInventory": "FALSE",
-      },
-      Object {
-        "assetPaths": Array [],
-        "customFields": Object {},
-        "facets": Array [],
-        "optionValues": Array [
-          "Full Imperial",
+        "translations": [
+          {
+            "customFields": {},
+            "languageCode": "en",
+            "optionValues": [
+              "Quarter Imperial",
+            ],
+          },
         ],
+      },
+      {
+        "assetPaths": [],
+        "facets": [],
         "price": 59.5,
         "sku": "PPSF",
         "stockOnHand": 10,
         "taxCategory": "standard",
         "trackInventory": "FALSE",
+        "translations": [
+          {
+            "customFields": {},
+            "languageCode": "en",
+            "optionValues": [
+              "Full Imperial",
+            ],
+          },
+        ],
       },
     ],
   },
 ]
 `;
 
-exports[`ImportParser parseProducts single product with a single variant 1`] = `
-Array [
-  Object {
-    "product": Object {
-      "assetPaths": Array [
+exports[`ImportParser > parseProducts > single product with a single variant 1`] = `
+[
+  {
+    "product": {
+      "assetPaths": [
         "pps1.jpg",
         "pps2.jpg",
       ],
-      "customFields": Object {},
-      "description": "A great device for stretching paper.",
-      "facets": Array [
-        Object {
-          "facet": "brand",
-          "value": "KB",
+      "facets": [
+        {
+          "translations": [
+            {
+              "facet": "brand",
+              "languageCode": "en",
+              "value": "KB",
+            },
+          ],
         },
-        Object {
-          "facet": "type",
-          "value": "Accessory",
+        {
+          "translations": [
+            {
+              "facet": "type",
+              "languageCode": "en",
+              "value": "Accessory",
+            },
+          ],
         },
       ],
-      "name": "Perfect Paper Stretcher",
-      "optionGroups": Array [],
-      "slug": "perfect-paper-stretcher",
+      "optionGroups": [],
+      "translations": [
+        {
+          "customFields": {},
+          "description": "A great device for stretching paper.",
+          "languageCode": "en",
+          "name": "Perfect Paper Stretcher",
+          "slug": "perfect-paper-stretcher",
+        },
+      ],
     },
-    "variants": Array [
-      Object {
-        "assetPaths": Array [],
-        "customFields": Object {},
-        "facets": Array [
-          Object {
-            "facet": "material",
-            "value": "Wood",
+    "variants": [
+      {
+        "assetPaths": [],
+        "facets": [
+          {
+            "translations": [
+              {
+                "facet": "material",
+                "languageCode": "en",
+                "value": "Wood",
+              },
+            ],
           },
         ],
-        "optionValues": Array [],
         "price": 45.3,
         "sku": "PPS12",
         "stockOnHand": 10,
         "taxCategory": "standard",
         "trackInventory": "FALSE",
+        "translations": [
+          {
+            "customFields": {},
+            "languageCode": "en",
+            "optionValues": [],
+          },
+        ],
       },
     ],
   },
 ]
 `;
 
-exports[`ImportParser parseProducts works with streamed input 1`] = `
-Array [
-  Object {
-    "product": Object {
-      "assetPaths": Array [],
-      "customFields": Object {},
-      "description": "A great device for stretching paper.",
-      "facets": Array [],
-      "name": "Perfect Paper Stretcher",
-      "optionGroups": Array [
-        Object {
-          "name": "size",
-          "values": Array [
-            "Half Imperial",
-            "Quarter Imperial",
-            "Full Imperial",
+exports[`ImportParser > parseProducts > works with multilingual input 1`] = `
+[
+  {
+    "product": {
+      "assetPaths": [],
+      "facets": [
+        {
+          "translations": [
+            {
+              "facet": "brand",
+              "languageCode": "en",
+              "value": "KB",
+            },
+            {
+              "facet": "品牌",
+              "languageCode": "zh_Hans",
+              "value": "KB",
+            },
+          ],
+        },
+        {
+          "translations": [
+            {
+              "facet": "type",
+              "languageCode": "en",
+              "value": "Accessory",
+            },
+            {
+              "facet": "类型",
+              "languageCode": "zh_Hans",
+              "value": "饰品",
+            },
           ],
         },
       ],
-      "slug": "Perfect-paper-stretcher",
+      "optionGroups": [
+        {
+          "translations": [
+            {
+              "languageCode": "en",
+              "name": "size",
+              "values": [
+                "Half Imperial",
+                "Quarter Imperial",
+                "Full Imperial",
+              ],
+            },
+            {
+              "languageCode": "zh_Hans",
+              "name": "size",
+              "values": [
+                "半英制",
+                "四分之一英制",
+                "全英制",
+              ],
+            },
+          ],
+        },
+      ],
+      "translations": [
+        {
+          "customFields": {
+            "customPage": "grid-view",
+            "keywords": "paper, stretch",
+          },
+          "description": "A great device for stretching paper.",
+          "languageCode": "en",
+          "name": "Perfect Paper Stretcher",
+          "slug": "perfect-paper-stretcher",
+        },
+        {
+          "customFields": {
+            "customPage": "grid-view",
+            "keywords": "纸张，拉伸",
+          },
+          "description": "一个用于拉伸纸张的伟大装置",
+          "languageCode": "zh_Hans",
+          "name": "完美的纸张拉伸器",
+          "slug": "完美的纸张拉伸器",
+        },
+      ],
     },
-    "variants": Array [
-      Object {
-        "assetPaths": Array [],
-        "customFields": Object {},
-        "facets": Array [],
-        "optionValues": Array [
-          "Half Imperial",
-        ],
+    "variants": [
+      {
+        "assetPaths": [],
+        "facets": [],
         "price": 45.3,
         "sku": "PPS12",
         "stockOnHand": 10,
         "taxCategory": "standard",
         "trackInventory": "FALSE",
-      },
-      Object {
-        "assetPaths": Array [],
-        "customFields": Object {},
-        "facets": Array [],
-        "optionValues": Array [
-          "Quarter Imperial",
+        "translations": [
+          {
+            "customFields": {
+              "volumetric": "243",
+            },
+            "languageCode": "en",
+            "optionValues": [
+              "Half Imperial",
+            ],
+          },
+          {
+            "customFields": {
+              "volumetric": "243",
+            },
+            "languageCode": "zh_Hans",
+            "optionValues": [
+              "半英制",
+            ],
+          },
         ],
+      },
+      {
+        "assetPaths": [],
+        "facets": [],
+        "price": 32.5,
+        "sku": "PPS14",
+        "stockOnHand": 10,
+        "taxCategory": "standard",
+        "trackInventory": "FALSE",
+        "translations": [
+          {
+            "customFields": {
+              "volumetric": "344",
+            },
+            "languageCode": "en",
+            "optionValues": [
+              "Quarter Imperial",
+            ],
+          },
+          {
+            "customFields": {
+              "volumetric": "344",
+            },
+            "languageCode": "zh_Hans",
+            "optionValues": [
+              "四分之一英制",
+            ],
+          },
+        ],
+      },
+      {
+        "assetPaths": [],
+        "facets": [],
+        "price": 59.5,
+        "sku": "PPSF",
+        "stockOnHand": 10,
+        "taxCategory": "standard",
+        "trackInventory": "FALSE",
+        "translations": [
+          {
+            "customFields": {
+              "volumetric": "656",
+            },
+            "languageCode": "en",
+            "optionValues": [
+              "Full Imperial",
+            ],
+          },
+          {
+            "customFields": {
+              "volumetric": "656",
+            },
+            "languageCode": "zh_Hans",
+            "optionValues": [
+              "全英制",
+            ],
+          },
+        ],
+      },
+    ],
+  },
+]
+`;
+
+exports[`ImportParser > parseProducts > works with streamed input 1`] = `
+[
+  {
+    "product": {
+      "assetPaths": [],
+      "facets": [],
+      "optionGroups": [
+        {
+          "translations": [
+            {
+              "languageCode": "en",
+              "name": "size",
+              "values": [
+                "Half Imperial",
+                "Quarter Imperial",
+                "Full Imperial",
+              ],
+            },
+          ],
+        },
+      ],
+      "translations": [
+        {
+          "customFields": {},
+          "description": "A great device for stretching paper.",
+          "languageCode": "en",
+          "name": "Perfect Paper Stretcher",
+          "slug": "Perfect-paper-stretcher",
+        },
+      ],
+    },
+    "variants": [
+      {
+        "assetPaths": [],
+        "facets": [],
+        "price": 45.3,
+        "sku": "PPS12",
+        "stockOnHand": 10,
+        "taxCategory": "standard",
+        "trackInventory": "FALSE",
+        "translations": [
+          {
+            "customFields": {},
+            "languageCode": "en",
+            "optionValues": [
+              "Half Imperial",
+            ],
+          },
+        ],
+      },
+      {
+        "assetPaths": [],
+        "facets": [],
         "price": 32.5,
         "sku": "PPS14",
         "stockOnHand": 11,
         "taxCategory": "standard",
         "trackInventory": "TRUE",
-      },
-      Object {
-        "assetPaths": Array [],
-        "customFields": Object {},
-        "facets": Array [],
-        "optionValues": Array [
-          "Full Imperial",
+        "translations": [
+          {
+            "customFields": {},
+            "languageCode": "en",
+            "optionValues": [
+              "Quarter Imperial",
+            ],
+          },
         ],
+      },
+      {
+        "assetPaths": [],
+        "facets": [],
         "price": 59.5,
         "sku": "PPSF",
         "stockOnHand": 12,
         "taxCategory": "standard",
         "trackInventory": "FALSE",
+        "translations": [
+          {
+            "customFields": {},
+            "languageCode": "en",
+            "optionValues": [
+              "Full Imperial",
+            ],
+          },
+        ],
       },
     ],
   },
-  Object {
-    "product": Object {
-      "assetPaths": Array [],
-      "customFields": Object {},
-      "description": "Mabef description",
-      "facets": Array [],
-      "name": "Mabef M/02 Studio Easel",
-      "optionGroups": Array [],
-      "slug": "mabef-m02-studio-easel",
+  {
+    "product": {
+      "assetPaths": [],
+      "facets": [],
+      "optionGroups": [],
+      "translations": [
+        {
+          "customFields": {},
+          "description": "Mabef description",
+          "languageCode": "en",
+          "name": "Mabef M/02 Studio Easel",
+          "slug": "mabef-m02-studio-easel",
+        },
+      ],
     },
-    "variants": Array [
-      Object {
-        "assetPaths": Array [],
-        "customFields": Object {},
-        "facets": Array [],
-        "optionValues": Array [],
+    "variants": [
+      {
+        "assetPaths": [],
+        "facets": [],
         "price": 910.7,
         "sku": "M02",
         "stockOnHand": 13,
         "taxCategory": "standard",
         "trackInventory": "TRUE",
+        "translations": [
+          {
+            "customFields": {},
+            "languageCode": "en",
+            "optionValues": [],
+          },
+        ],
       },
     ],
   },
-  Object {
-    "product": Object {
-      "assetPaths": Array [],
-      "customFields": Object {},
-      "description": "Really mega pencils",
-      "facets": Array [],
-      "name": "Giotto Mega Pencils",
-      "optionGroups": Array [
-        Object {
-          "name": "box size",
-          "values": Array [
-            "Box of 8",
-            "Box of 12",
+  {
+    "product": {
+      "assetPaths": [],
+      "facets": [],
+      "optionGroups": [
+        {
+          "translations": [
+            {
+              "languageCode": "en",
+              "name": "box size",
+              "values": [
+                "Box of 8",
+                "Box of 12",
+              ],
+            },
           ],
         },
       ],
-      "slug": "giotto-mega-pencils",
+      "translations": [
+        {
+          "customFields": {},
+          "description": "Really mega pencils",
+          "languageCode": "en",
+          "name": "Giotto Mega Pencils",
+          "slug": "giotto-mega-pencils",
+        },
+      ],
     },
-    "variants": Array [
-      Object {
-        "assetPaths": Array [],
-        "customFields": Object {},
-        "facets": Array [],
-        "optionValues": Array [
-          "Box of 8",
-        ],
+    "variants": [
+      {
+        "assetPaths": [],
+        "facets": [],
         "price": 4.16,
         "sku": "225400",
         "stockOnHand": 14,
         "taxCategory": "standard",
         "trackInventory": "FALSE",
-      },
-      Object {
-        "assetPaths": Array [],
-        "customFields": Object {},
-        "facets": Array [],
-        "optionValues": Array [
-          "Box of 12",
+        "translations": [
+          {
+            "customFields": {},
+            "languageCode": "en",
+            "optionValues": [
+              "Box of 8",
+            ],
+          },
         ],
+      },
+      {
+        "assetPaths": [],
+        "facets": [],
         "price": 6.24,
         "sku": "225600",
         "stockOnHand": 15,
         "taxCategory": "standard",
         "trackInventory": "TRUE",
+        "translations": [
+          {
+            "customFields": {},
+            "languageCode": "en",
+            "optionValues": [
+              "Box of 12",
+            ],
+          },
+        ],
       },
     ],
   },
-  Object {
-    "product": Object {
-      "assetPaths": Array [],
-      "customFields": Object {},
-      "description": "Keeps the paint off the clothes",
-      "facets": Array [],
-      "name": "Artists Smock",
-      "optionGroups": Array [
-        Object {
-          "name": "size",
-          "values": Array [
-            "small",
-            "large",
+  {
+    "product": {
+      "assetPaths": [],
+      "facets": [],
+      "optionGroups": [
+        {
+          "translations": [
+            {
+              "languageCode": "en",
+              "name": "size",
+              "values": [
+                "small",
+                "large",
+              ],
+            },
           ],
         },
-        Object {
-          "name": "colour",
-          "values": Array [
-            "beige",
-            "navy",
+        {
+          "translations": [
+            {
+              "languageCode": "en",
+              "name": "colour",
+              "values": [
+                "beige",
+                "navy",
+              ],
+            },
           ],
         },
       ],
-      "slug": "artists-smock",
+      "translations": [
+        {
+          "customFields": {},
+          "description": "Keeps the paint off the clothes",
+          "languageCode": "en",
+          "name": "Artists Smock",
+          "slug": "artists-smock",
+        },
+      ],
     },
-    "variants": Array [
-      Object {
-        "assetPaths": Array [],
-        "customFields": Object {},
-        "facets": Array [],
-        "optionValues": Array [
-          "small",
-          "beige",
-        ],
+    "variants": [
+      {
+        "assetPaths": [],
+        "facets": [],
         "price": 11.99,
         "sku": "10112",
         "stockOnHand": 16,
         "taxCategory": "standard",
         "trackInventory": "FALSE",
-      },
-      Object {
-        "assetPaths": Array [],
-        "customFields": Object {},
-        "facets": Array [],
-        "optionValues": Array [
-          "large",
-          "beige",
+        "translations": [
+          {
+            "customFields": {},
+            "languageCode": "en",
+            "optionValues": [
+              "small",
+              "beige",
+            ],
+          },
         ],
+      },
+      {
+        "assetPaths": [],
+        "facets": [],
         "price": 11.99,
         "sku": "10113",
         "stockOnHand": 17,
         "taxCategory": "standard",
         "trackInventory": "TRUE",
-      },
-      Object {
-        "assetPaths": Array [],
-        "customFields": Object {},
-        "facets": Array [],
-        "optionValues": Array [
-          "small",
-          "navy",
+        "translations": [
+          {
+            "customFields": {},
+            "languageCode": "en",
+            "optionValues": [
+              "large",
+              "beige",
+            ],
+          },
         ],
+      },
+      {
+        "assetPaths": [],
+        "facets": [],
         "price": 11.99,
         "sku": "10114",
         "stockOnHand": 18,
         "taxCategory": "standard",
         "trackInventory": "FALSE",
-      },
-      Object {
-        "assetPaths": Array [],
-        "customFields": Object {},
-        "facets": Array [],
-        "optionValues": Array [
-          "large",
-          "navy",
+        "translations": [
+          {
+            "customFields": {},
+            "languageCode": "en",
+            "optionValues": [
+              "small",
+              "navy",
+            ],
+          },
         ],
+      },
+      {
+        "assetPaths": [],
+        "facets": [],
         "price": 11.99,
         "sku": "10115",
         "stockOnHand": 19,
         "taxCategory": "standard",
         "trackInventory": "TRUE",
+        "translations": [
+          {
+            "customFields": {},
+            "languageCode": "en",
+            "optionValues": [
+              "large",
+              "navy",
+            ],
+          },
+        ],
       },
     ],
   },

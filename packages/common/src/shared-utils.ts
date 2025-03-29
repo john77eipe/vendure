@@ -1,3 +1,5 @@
+import { CustomFieldConfig } from './generated-types';
+
 /**
  * Predicate with type guard, used to filter out null or undefined values
  * in a filter operation.
@@ -22,7 +24,37 @@ export function isObject(item: any): item is object {
 }
 
 export function isClassInstance(item: any): boolean {
-    return isObject(item) && item.constructor.name !== 'Object';
+    // Even if item is an object, it might not have a constructor as in the
+    // case when it is a null-prototype object, i.e. created using `Object.create(null)`.
+    return isObject(item) && item.constructor && item.constructor.name !== 'Object';
+}
+
+type NumericPropsOf<T> = {
+    [K in keyof T]: T[K] extends number ? K : never;
+}[keyof T];
+
+// homomorphic helper type
+// From https://stackoverflow.com/a/56140392/772859
+type NPO<T, KT extends keyof T> = {
+    [K in KT]: T[K] extends string | number | boolean
+        ? T[K]
+        : T[K] extends Array<infer A>
+        ? Array<OnlyNumerics<A>>
+        : OnlyNumerics<T[K]>;
+};
+
+// quick abort if T is a function or primitive
+// otherwise pass to a homomorphic helper type
+type OnlyNumerics<T> = NPO<T, NumericPropsOf<T>>;
+
+/**
+ * Adds up all the values of a given numeric property of a list of objects.
+ */
+export function summate<T extends OnlyNumerics<T>>(
+    items: T[] | undefined | null,
+    prop: keyof OnlyNumerics<T>,
+): number {
+    return (items || []).reduce((sum, i) => sum + (i[prop] as unknown as number), 0);
 }
 
 /**
@@ -53,11 +85,24 @@ export function generateAllCombinations<T>(
         output.push(combination);
         return [];
     } else {
-        // tslint:disable:prefer-for-of
+        /* eslint-disable @typescript-eslint/prefer-for-of */
         for (let i = 0; i < optionGroups[k].length; i++) {
             generateAllCombinations(optionGroups, combination.concat(optionGroups[k][i]), k + 1, output);
         }
-        // tslint:enable:prefer-for-of
+        /* eslint-enable @typescript-eslint/prefer-for-of */
         return output;
+    }
+}
+
+/**
+ * @description
+ * Returns the input field name of a custom field, taking into account that "relation" type custom
+ * field inputs are suffixed with "Id" or "Ids".
+ */
+export function getGraphQlInputName(config: { name: string; type: string; list?: boolean }): string {
+    if (config.type === 'relation') {
+        return config.list === true ? `${config.name}Ids` : `${config.name}Id`;
+    } else {
+        return config.name;
     }
 }

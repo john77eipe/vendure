@@ -14,6 +14,7 @@ export const REQUEST_COMPLETED = gql`
 
 export const USER_STATUS_FRAGMENT = gql`
     fragment UserStatus on UserStatus {
+        administratorId
         username
         isLoggedIn
         loginTime
@@ -46,9 +47,40 @@ export const SET_AS_LOGGED_OUT = gql`
     ${USER_STATUS_FRAGMENT}
 `;
 
-export const SET_UI_LANGUAGE = gql`
-    mutation SetUiLanguage($languageCode: LanguageCode!) {
+export const SET_UI_LANGUAGE_AND_LOCALE = gql`
+    mutation SetUiLanguage($languageCode: LanguageCode!, $locale: String) {
         setUiLanguage(languageCode: $languageCode) @client
+        setUiLocale(locale: $locale) @client
+    }
+`;
+
+export const SET_UI_LOCALE = gql`
+    mutation SetUiLocale($locale: String) {
+        setUiLocale(locale: $locale) @client
+    }
+`;
+
+export const SET_DISPLAY_UI_EXTENSION_POINTS = gql`
+    mutation SetDisplayUiExtensionPoints($display: Boolean!) {
+        setDisplayUiExtensionPoints(display: $display) @client
+    }
+`;
+
+export const SET_MAIN_NAV_EXPANDED = gql`
+    mutation SetMainNavExpanded($expanded: Boolean!) {
+        setMainNavExpanded(expanded: $expanded) @client
+    }
+`;
+
+export const SET_CONTENT_LANGUAGE = gql`
+    mutation SetContentLanguage($languageCode: LanguageCode!) {
+        setContentLanguage(languageCode: $languageCode) @client
+    }
+`;
+
+export const SET_UI_THEME = gql`
+    mutation SetUiTheme($theme: String!) {
+        setUiTheme(theme: $theme) @client
     }
 `;
 
@@ -73,6 +105,11 @@ export const GET_UI_STATE = gql`
     query GetUiState {
         uiState @client {
             language
+            locale
+            contentLanguage
+            theme
+            displayUiExtensionPoints
+            mainNavExpanded
         }
     }
 `;
@@ -87,6 +124,11 @@ export const GET_CLIENT_STATE = gql`
         }
         uiState @client {
             language
+            locale
+            contentLanguage
+            theme
+            displayUiExtensionPoints
+            mainNavExpanded
         }
     }
     ${USER_STATUS_FRAGMENT}

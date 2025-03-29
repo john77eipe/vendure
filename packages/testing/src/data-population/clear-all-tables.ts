@@ -2,21 +2,21 @@ import { VendureConfig } from '@vendure/core';
 import { preBootstrapConfig } from '@vendure/core/dist/bootstrap';
 import { createConnection } from 'typeorm';
 
-// tslint:disable:no-console
-// tslint:disable:no-floating-promises
+/* eslint-disable no-console */
+/* eslint-disable @typescript-eslint/no-floating-promises */
 /**
- * Clears all tables in the detabase sepcified by the connectionOptions
+ * Clears all tables in the database specified by the connectionOptions
  */
 export async function clearAllTables(config: VendureConfig, logging = true) {
     if (logging) {
         console.log('Clearing all tables...');
     }
     config = await preBootstrapConfig(config);
-    const entityIdStrategy = config.entityIdStrategy;
+    const entityIdStrategy = config.entityIdStrategy ?? config.entityOptions?.entityIdStrategy;
     const connection = await createConnection({ ...config.dbConnectionOptions });
     try {
         await connection.synchronize(true);
-    } catch (err) {
+    } catch (err: any) {
         console.error('Error occurred when attempting to clear tables!');
         console.log(err);
     } finally {

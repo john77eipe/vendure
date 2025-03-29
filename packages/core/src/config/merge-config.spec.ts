@@ -1,3 +1,5 @@
+import { describe, expect, it } from 'vitest';
+
 import { mergeConfig } from './merge-config';
 
 describe('mergeConfig()', () => {
@@ -26,6 +28,17 @@ describe('mergeConfig()', () => {
             a: 1,
             b: 3,
             c: 5,
+        });
+    });
+
+    it('does not merge arrays', () => {
+        const input: any = {
+            a: [1],
+        };
+
+        const result = mergeConfig(input, { a: [2] } as any);
+        expect(result).toEqual({
+            a: [2],
         });
     });
 

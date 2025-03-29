@@ -1,87 +1,100 @@
-import { Component } from '@angular/core';
-import { ActivatedRoute, Router } from '@angular/router';
+import { Component, OnInit } from '@angular/core';
 import { marker as _ } from '@biesbjerg/ngx-translate-extract-marker';
-import { BaseListComponent } from '@vendure/admin-ui/core';
-import { DeletionResult, GetFacetList } from '@vendure/admin-ui/core';
-import { NotificationService } from '@vendure/admin-ui/core';
-import { DataService } from '@vendure/admin-ui/core';
-import { ModalService } from '@vendure/admin-ui/core';
-import { EMPTY } from 'rxjs';
-import { map, switchMap } from 'rxjs/operators';
+import {
+    DataService,
+    FACET_WITH_VALUE_LIST_FRAGMENT,
+    GetFacetListDocument,
+    GetFacetListQuery,
+    ItemOf,
+    LanguageCode,
+    TypedBaseListComponent,
+} from '@vendure/admin-ui/core';
+import { gql } from 'apollo-angular';
+
+export const FACET_LIST_QUERY = gql`
+    query GetFacetList($options: FacetListOptions, $facetValueListOptions: FacetValueListOptions) {
+        facets(options: $options) {
+            items {
+                ...FacetWithValueList
+            }
+            totalItems
+        }
+    }
+    ${FACET_WITH_VALUE_LIST_FRAGMENT}
+`;
 
 @Component({
     selector: 'vdr-facet-list',
     templateUrl: './facet-list.component.html',
     styleUrls: ['./facet-list.component.scss'],
 })
-export class FacetListComponent extends BaseListComponent<GetFacetList.Query, GetFacetList.Items> {
+export class FacetListComponent
+    extends TypedBaseListComponent<typeof GetFacetListDocument, 'facets'>
+    implements OnInit
+{
     readonly initialLimit = 3;
     displayLimit: { [id: string]: number } = {};
-    constructor(
-        private dataService: DataService,
-        private modalService: ModalService,
-        private notificationService: NotificationService,
-        router: Router,
-        route: ActivatedRoute,
-    ) {
-        super(router, route);
-        super.setQueryFn(
-            (...args: any[]) => this.dataService.facet.getFacets(...args).refetchOnChannelChange(),
-            data => data.facets,
-        );
+
+    dataTableListId = 'facet-list';
+    readonly customFields = this.getCustomFieldConfig('Facet');
+    readonly filters = this.createFilterCollection()
+        .addIdFilter()
+        .addDateFilters()
+        .addFilter({
+            name: 'visibility',
+            type: { kind: 'boolean' },
+            label: _('common.visibility'),
+            toFilterInput: value => ({
+                isPrivate: { eq: !value },
+            }),
+        })
+        .addCustomFieldFilters(this.customFields)
+        .connectToRoute(this.route);
+
+    readonly sorts = this.createSortCollection()
+        .defaultSort('createdAt', 'DESC')
+        .addSort({ name: 'id' })
+        .addSort({ name: 'createdAt' })
+        .addSort({ name: 'updatedAt' })
+        .addSort({ name: 'name' })
+        .addSort({ name: 'code' })
+        .addCustomFieldSorts(this.customFields)
+        .connectToRoute(this.route);
+
+    constructor(protected dataService: DataService) {
+        super();
+        super.configure({
+            document: GetFacetListDocument,
+            getItems: data => data.facets,
+            setVariables: (skip, take) => ({
+                options: {
+                    skip,
+                    take,
+                    filter: {
+                        name: {
+                            contains: this.searchTermControl.value,
+                        },
+                        ...this.filters.createFilterInput(),
+                    },
+                    sort: this.sorts.createSortInput(),
+                },
+                facetValueListOptions: {
+                    take: 100,
+                },
+            }),
+            refreshListOnChanges: [this.filters.valueChanges, this.sorts.valueChanges],
+        });
     }
 
-    toggleDisplayLimit(facet: GetFacetList.Items) {
-        if (this.displayLimit[facet.id] === facet.values.length) {
+    toggleDisplayLimit(facet: ItemOf<GetFacetListQuery, 'facets'>) {
+        if (this.displayLimit[facet.id] === facet.valueList.items.length) {
             this.displayLimit[facet.id] = this.initialLimit;
         } else {
-            this.displayLimit[facet.id] = facet.values.length;
+            this.displayLimit[facet.id] = facet.valueList.items.length;
         }
     }
 
-    deleteFacet(facetValueId: string) {
-        this.showModalAndDelete(facetValueId)
-            .pipe(
-                switchMap(response => {
-                    if (response.result === DeletionResult.DELETED) {
-                        return [true];
-                    } else {
-                        return this.showModalAndDelete(facetValueId, response.message || '').pipe(
-                            map(r => r.result === DeletionResult.DELETED),
-                        );
-                    }
-                }),
-                // Refresh the cached facets to reflect the changes
-                switchMap(() => this.dataService.facet.getAllFacets(true).single$),
-            )
-            .subscribe(
-                () => {
-                    this.notificationService.success(_('common.notify-delete-success'), {
-                        entity: 'FacetValue',
-                    });
-                    this.refresh();
-                },
-                err => {
-                    this.notificationService.error(_('common.notify-delete-error'), {
-                        entity: 'FacetValue',
-                    });
-                },
-            );
-    }
-
-    private showModalAndDelete(facetId: string, message?: string) {
-        return this.modalService
-            .dialog({
-                title: _('catalog.confirm-delete-facet'),
-                body: message,
-                buttons: [
-                    { type: 'secondary', label: _('common.cancel') },
-                    { type: 'danger', label: _('common.delete'), returnValue: true },
-                ],
-            })
-            .pipe(
-                switchMap(res => (res ? this.dataService.facet.deleteFacet(facetId, !!message) : EMPTY)),
-                map(res => res.deleteFacet),
-            );
+    setLanguage(code: LanguageCode) {
+        this.dataService.client.setContentLanguage(code).subscribe();
     }
 }

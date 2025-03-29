@@ -1,16 +1,17 @@
 import { ChangeDetectorRef, OnDestroy, Pipe, PipeTransform } from '@angular/core';
-import { Observable, Subscription } from 'rxjs';
-
-import { DataService } from '../../data/providers/data.service';
+import { Subscription } from 'rxjs';
+import { PermissionsService } from '../../providers/permissions/permissions.service';
 
 /**
+ * @description
  * A pipe which checks the provided permission against all the permissions of the current user.
  * Returns `true` if the current user has that permission.
  *
  * @example
- * ```
+ * ```HTML
  * <button [disabled]="!('UpdateCatalog' | hasPermission)">Save Changes</button>
  * ```
+ * @docsCategory pipes
  */
 @Pipe({
     name: 'hasPermission',
@@ -18,23 +19,23 @@ import { DataService } from '../../data/providers/data.service';
 })
 export class HasPermissionPipe implements PipeTransform, OnDestroy {
     private hasPermission = false;
-    private currentPermissions$: Observable<string[]>;
-    private permission: string | null = null;
+    private lastPermissions: string | null = null;
     private subscription: Subscription;
 
-    constructor(private dataService: DataService, private changeDetectorRef: ChangeDetectorRef) {
-        this.currentPermissions$ = this.dataService.client
-            .userStatus()
-            .mapStream(data => data.userStatus.permissions);
-    }
+    constructor(
+        private permissionsService: PermissionsService,
+        private changeDetectorRef: ChangeDetectorRef,
+    ) {}
 
-    transform(permission: string): any {
-        if (this.permission !== permission) {
-            this.permission = permission;
+    transform(input: string | string[]): any {
+        const requiredPermissions = Array.isArray(input) ? input : [input];
+        const requiredPermissionsString = requiredPermissions.join(',');
+        if (this.lastPermissions !== requiredPermissionsString) {
+            this.lastPermissions = requiredPermissionsString;
             this.hasPermission = false;
             this.dispose();
-            this.subscription = this.currentPermissions$.subscribe(permissions => {
-                this.hasPermission = permissions.includes(permission);
+            this.subscription = this.permissionsService.currentUserPermissions$.subscribe(() => {
+                this.hasPermission = this.permissionsService.userHasPermissions(requiredPermissions);
                 this.changeDetectorRef.markForCheck();
             });
         }

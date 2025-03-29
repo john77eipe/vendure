@@ -1,9 +1,10 @@
-import { INestApplication, INestMicroservice, Module } from '@nestjs/common';
+import { Module, Provider, Type as NestType } from '@nestjs/common';
 import { MODULE_METADATA } from '@nestjs/common/constants';
 import { ModuleMetadata } from '@nestjs/common/interfaces';
+import { APP_FILTER, APP_GUARD, APP_INTERCEPTOR, APP_PIPE } from '@nestjs/core';
 import { pick } from '@vendure/common/lib/pick';
 import { Type } from '@vendure/common/lib/shared-types';
-import { DocumentNode } from 'graphql';
+import { DocumentNode, GraphQLScalarType } from 'graphql';
 
 import { RuntimeVendureConfig } from '../config/vendure-config';
 
@@ -39,15 +40,33 @@ export interface VendurePluginMetadata extends ModuleMetadata {
     adminApiExtensions?: APIExtensionDefinition;
     /**
      * @description
-     * The plugin may define [Nestjs microservice controllers](https://docs.nestjs.com/microservices/basics#request-response)
-     * which are run in the Worker context.
-     */
-    workers?: Array<Type<any>>;
-    /**
-     * @description
      * The plugin may define custom [TypeORM database entities](https://typeorm.io/#/entities).
      */
-    entities?: Array<Type<any>>;
+    entities?: Array<Type<any>> | (() => Array<Type<any>>);
+    /**
+     * @description
+     * The plugin should define a valid [semver version string](https://www.npmjs.com/package/semver) to indicate which versions of
+     * Vendure core it is compatible with. Attempting to use a plugin with an incompatible
+     * version of Vendure will result in an error and the server will be unable to bootstrap.
+     *
+     * If a plugin does not define this property, a message will be logged on bootstrap that the plugin is not
+     * guaranteed to be compatible with the current version of Vendure.
+     *
+     * To effectively disable this check for a plugin, you can use an overly-permissive string such as `>0.0.0`.
+     *
+     * :::note
+     * Since Vendure v3.1.0, it is possible to ignore compatibility errors for specific plugins by
+     * passing the `ignoreCompatibilityErrorsForPlugins` option to the {@link bootstrap} function.
+     * :::
+     *
+     * @example
+     * ```ts
+     * compatibility: '^3.0.0'
+     * ```
+     *
+     * @since 2.0.0
+     */
+    compatibility?: string;
 }
 /**
  * @description
@@ -63,20 +82,29 @@ export interface APIExtensionDefinition {
      * Extensions to the schema.
      *
      * @example
-     * ```TypeScript
+     * ```ts
      * const schema = gql`extend type SearchReindexResponse {
      *     timeTaken: Int!
      *     indexedItemCount: Int!
      * }`;
      * ```
      */
-    schema?: DocumentNode | (() => DocumentNode);
+    schema?: DocumentNode | (() => DocumentNode | undefined);
     /**
      * @description
      * An array of resolvers for the schema extensions. Should be defined as [Nestjs GraphQL resolver](https://docs.nestjs.com/graphql/resolvers-map)
      * classes, i.e. using the Nest `\@Resolver()` decorator etc.
      */
-    resolvers: Array<Type<any>> | (() => Array<Type<any>>);
+    resolvers?: Array<Type<any>> | (() => Array<Type<any>>);
+    /**
+     * @description
+     * A map of GraphQL scalar types which should correspond to any custom scalars defined in your schema.
+     * Read more about defining custom scalars in the
+     * [Apollo Server Custom Scalars docs](https://www.apollographql.com/docs/apollo-server/schema/custom-scalars)
+     *
+     * @since 1.7.0
+     */
+    scalars?: Record<string, GraphQLScalarType> | (() => Record<string, GraphQLScalarType>);
 }
 
 /**
@@ -100,7 +128,7 @@ export type PluginConfigurationFn = (
  * entirely new types. Database entities and resolvers can also be defined to handle the extended GraphQL types.
  *
  * @example
- * ```TypeScript
+ * ```ts
  * import { Controller, Get } from '\@nestjs/common';
  * import { Ctx, PluginCommonModule, ProductService, RequestContext, VendurePlugin } from '\@vendure/core';
  *
@@ -126,7 +154,7 @@ export type PluginConfigurationFn = (
  * @docsCategory plugin
  */
 export function VendurePlugin(pluginMetadata: VendurePluginMetadata): ClassDecorator {
-    // tslint:disable-next-line:ban-types
+    // eslint-disable-next-line @typescript-eslint/ban-types
     return (target: Function) => {
         for (const metadataProperty of Object.values(PLUGIN_METADATA)) {
             const property = metadataProperty as keyof VendurePluginMetadata;
@@ -135,85 +163,26 @@ export function VendurePlugin(pluginMetadata: VendurePluginMetadata): ClassDecor
             }
         }
         const nestModuleMetadata = pick(pluginMetadata, Object.values(MODULE_METADATA) as any);
+        // Automatically add any of the Plugin's "providers" to the "exports" array. This is done
+        // because when a plugin defines GraphQL resolvers, these resolvers are used to dynamically
+        // created a new Module in the ApiModule, and if those resolvers depend on any providers,
+        // the must be exported. See the function {@link createDynamicGraphQlModulesForPlugins}
+        // for the implementation.
+        // However, we must omit any global providers (https://github.com/vendure-ecommerce/vendure/issues/837)
+        const nestGlobalProviderTokens = [APP_INTERCEPTOR, APP_FILTER, APP_GUARD, APP_PIPE];
+        const exportedProviders = (nestModuleMetadata.providers || []).filter(provider => {
+            if (isNamedProvider(provider)) {
+                if (nestGlobalProviderTokens.includes(provider.provide as any)) {
+                    return false;
+                }
+            }
+            return true;
+        });
+        nestModuleMetadata.exports = [...(nestModuleMetadata.exports || []), ...exportedProviders];
         Module(nestModuleMetadata)(target);
     };
 }
 
-/**
- * @description
- * A plugin which implements a static `beforeVendureBootstrap` method with this type can define logic to run
- * before the Vendure server (and the underlying Nestjs application) is bootstrapped. This is called
- * _after_ the Nestjs application has been created, but _before_ the `app.listen()` method is invoked.
- *
- * @docsCategory plugin
- * @docsPage Plugin Lifecycle Methods
- */
-export type BeforeVendureBootstrap = (app: INestApplication) => void | Promise<void>;
-
-/**
- * @description
- * A plugin which implements a static `beforeVendureWorkerBootstrap` method with this type can define logic to run
- * before the Vendure worker (and the underlying Nestjs microservice) is bootstrapped. This is called
- * _after_ the Nestjs microservice has been created, but _before_ the `microservice.listen()` method is invoked.
- *
- * @docsCategory plugin
- * @docsPage Plugin Lifecycle Methods
- */
-export type BeforeVendureWorkerBootstrap = (app: INestMicroservice) => void | Promise<void>;
-
-/**
- * @description
- * A plugin which implements this interface can define logic to run when the Vendure server is initialized.
- *
- * For example, this could be used to call out to an external API or to set up {@link EventBus} listeners.
- *
- * @docsCategory plugin
- * @docsPage Plugin Lifecycle Methods
- */
-export interface OnVendureBootstrap {
-    onVendureBootstrap(): void | Promise<void>;
+function isNamedProvider(provider: Provider): provider is Exclude<Provider, NestType<any>> {
+    return provider.hasOwnProperty('provide');
 }
-
-/**
- * @description
- * A plugin which implements this interface can define logic to run when the Vendure worker is initialized.
- *
- * For example, this could be used to start or connect to a server or databased used by the worker.
- *
- * @docsCategory plugin
- * @docsPage Plugin Lifecycle Methods
- */
-export interface OnVendureWorkerBootstrap {
-    onVendureWorkerBootstrap(): void | Promise<void>;
-}
-
-/**
- * @description
- * A plugin which implements this interface can define logic to run before Vendure server is closed.
- *
- * For example, this could be used to clean up any processes started by the {@link OnVendureBootstrap} method.
- *
- * @docsCategory plugin
- * @docsPage Plugin Lifecycle Methods
- */
-export interface OnVendureClose {
-    onVendureClose(): void | Promise<void>;
-}
-
-/**
- * @description
- * A plugin which implements this interface can define logic to run before Vendure worker is closed.
- *
- * For example, this could be used to close any open connections to external services.
- *
- * @docsCategory plugin
- * @docsPage Plugin Lifecycle Methods
- */
-export interface OnVendureWorkerClose {
-    onVendureWorkerClose(): void | Promise<void>;
-}
-
-export type PluginLifecycleMethods = OnVendureBootstrap &
-    OnVendureWorkerBootstrap &
-    OnVendureClose &
-    OnVendureWorkerClose;

@@ -1,7 +1,5 @@
 import { Permission } from '@vendure/common/lib/generated-types';
 
-import { DEFAULT_PERMISSIONS } from './constants';
-
 /**
  * @description
  * Configures a {@link PermissionDefinition}
@@ -55,14 +53,14 @@ export type PermissionMetadata = Required<PermissionDefinitionConfig>;
  * **Note:** To define CRUD permissions, use the {@link CrudPermissionDefinition}.
  *
  * @example
- * ```TypeScript
+ * ```ts
  * export const sync = new PermissionDefinition({
  *   name: 'SyncInventory',
  *   description: 'Allows syncing stock levels via Admin API'
  * });
  * ```
  *
- * ```TypeScript
+ * ```ts
  * const config: VendureConfig = {
  *   authOptions: {
  *     customPermissions: [sync],
@@ -70,7 +68,7 @@ export type PermissionMetadata = Required<PermissionDefinitionConfig>;
  * }
  * ```
  *
- * ```TypeScript
+ * ```ts
  * \@Resolver()
  * export class ExternalSyncResolver {
  *
@@ -117,11 +115,11 @@ export class PermissionDefinition {
  * 4 Permissions: 'CreateWishlist', 'ReadWishlist', 'UpdateWishlist' & 'DeleteWishlist'.
  *
  * @example
- * ```TypeScript
+ * ```ts
  * export const wishlist = new CrudPermissionDefinition('Wishlist');
  * ```
  *
- * ```TypeScript
+ * ```ts
  * const config: VendureConfig = {
  *   authOptions: {
  *     customPermissions: [wishlist],
@@ -129,7 +127,7 @@ export class PermissionDefinition {
  * }
  * ```
  *
- * ```TypeScript
+ * ```ts
  * \@Resolver()
  * export class WishlistResolver {
  *
@@ -146,7 +144,10 @@ export class PermissionDefinition {
  * @docsWeight 1
  */
 export class CrudPermissionDefinition extends PermissionDefinition {
-    constructor(name: string) {
+    constructor(
+        name: string,
+        private descriptionFn?: (operation: 'create' | 'read' | 'update' | 'delete') => string,
+    ) {
         super({ name });
     }
 
@@ -154,7 +155,10 @@ export class CrudPermissionDefinition extends PermissionDefinition {
     getMetadata(): PermissionMetadata[] {
         return ['Create', 'Read', 'Update', 'Delete'].map(operation => ({
             name: `${operation}${this.config.name}`,
-            description: `Grants permission to ${operation.toLocaleLowerCase()} ${this.config.name}`,
+            description:
+                typeof this.descriptionFn === 'function'
+                    ? this.descriptionFn(operation.toLocaleLowerCase() as any)
+                    : `Grants permission to ${operation.toLocaleLowerCase()} ${this.config.name}`,
             assignable: true,
             internal: false,
         }));
@@ -195,9 +199,4 @@ export class CrudPermissionDefinition extends PermissionDefinition {
     get Delete(): Permission {
         return `Delete${this.config.name}` as Permission;
     }
-}
-
-export function getAllPermissionsMetadata(customPermissions: PermissionDefinition[]): PermissionMetadata[] {
-    const allPermissions = [...DEFAULT_PERMISSIONS, ...customPermissions];
-    return allPermissions.reduce((all, def) => [...all, ...def.getMetadata()], [] as PermissionMetadata[]);
 }

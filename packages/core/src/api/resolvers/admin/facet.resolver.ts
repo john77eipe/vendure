@@ -1,27 +1,34 @@
 import { Args, Mutation, Query, Resolver } from '@nestjs/graphql';
 import {
     DeletionResponse,
+    MutationAssignFacetsToChannelArgs,
     MutationCreateFacetArgs,
     MutationCreateFacetValuesArgs,
     MutationDeleteFacetArgs,
+    MutationDeleteFacetsArgs,
     MutationDeleteFacetValuesArgs,
+    MutationRemoveFacetsFromChannelArgs,
     MutationUpdateFacetArgs,
     MutationUpdateFacetValuesArgs,
     Permission,
     QueryFacetArgs,
     QueryFacetsArgs,
+    QueryFacetValuesArgs,
+    RemoveFacetFromChannelResult,
 } from '@vendure/common/lib/generated-types';
 import { PaginatedList } from '@vendure/common/lib/shared-types';
 
 import { EntityNotFoundError } from '../../../common/error/errors';
+import { ErrorResultUnion } from '../../../common/error/error-result';
 import { Translated } from '../../../common/types/locale-types';
 import { ConfigService } from '../../../config/config.service';
-import { FacetValue } from '../../../entity/facet-value/facet-value.entity';
 import { Facet } from '../../../entity/facet/facet.entity';
+import { FacetValue } from '../../../entity/facet-value/facet-value.entity';
 import { FacetValueService } from '../../../service/services/facet-value.service';
 import { FacetService } from '../../../service/services/facet.service';
 import { RequestContext } from '../../common/request-context';
 import { Allow } from '../../decorators/allow.decorator';
+import { RelationPaths, Relations } from '../../decorators/relations.decorator';
 import { Ctx } from '../../decorators/request-context.decorator';
 import { Transaction } from '../../decorators/transaction.decorator';
 
@@ -34,26 +41,38 @@ export class FacetResolver {
     ) {}
 
     @Query()
-    @Allow(Permission.ReadCatalog)
+    @Allow(Permission.ReadCatalog, Permission.ReadProduct, Permission.ReadFacet)
     facets(
         @Ctx() ctx: RequestContext,
         @Args() args: QueryFacetsArgs,
+        @Relations(Facet) relations: RelationPaths<Facet>,
     ): Promise<PaginatedList<Translated<Facet>>> {
-        return this.facetService.findAll(ctx, args.options || undefined);
+        return this.facetService.findAll(ctx, args.options || undefined, relations);
     }
 
     @Query()
-    @Allow(Permission.ReadCatalog)
+    @Allow(Permission.ReadCatalog, Permission.ReadProduct, Permission.ReadFacet)
     async facet(
         @Ctx() ctx: RequestContext,
         @Args() args: QueryFacetArgs,
+        @Relations(Facet) relations: RelationPaths<Facet>,
     ): Promise<Translated<Facet> | undefined> {
-        return this.facetService.findOne(ctx, args.id);
+        return this.facetService.findOne(ctx, args.id, relations);
+    }
+
+    @Query()
+    @Allow(Permission.ReadCatalog, Permission.ReadProduct, Permission.ReadFacet)
+    facetValues(
+        @Ctx() ctx: RequestContext,
+        @Args() args: QueryFacetValuesArgs,
+        @Relations(FacetValue) relations: RelationPaths<FacetValue>,
+    ): Promise<PaginatedList<Translated<FacetValue>>> {
+        return this.facetValueService.findAllList(ctx, args.options || undefined, relations);
     }
 
     @Transaction()
     @Mutation()
-    @Allow(Permission.CreateCatalog)
+    @Allow(Permission.CreateCatalog, Permission.CreateFacet)
     async createFacet(
         @Ctx() ctx: RequestContext,
         @Args() args: MutationCreateFacetArgs,
@@ -72,7 +91,7 @@ export class FacetResolver {
 
     @Transaction()
     @Mutation()
-    @Allow(Permission.UpdateCatalog)
+    @Allow(Permission.UpdateCatalog, Permission.UpdateFacet)
     async updateFacet(
         @Ctx() ctx: RequestContext,
         @Args() args: MutationUpdateFacetArgs,
@@ -83,7 +102,7 @@ export class FacetResolver {
 
     @Transaction()
     @Mutation()
-    @Allow(Permission.DeleteCatalog)
+    @Allow(Permission.DeleteCatalog, Permission.DeleteFacet)
     async deleteFacet(
         @Ctx() ctx: RequestContext,
         @Args() args: MutationDeleteFacetArgs,
@@ -91,9 +110,19 @@ export class FacetResolver {
         return this.facetService.delete(ctx, args.id, args.force || false);
     }
 
-    // @Transaction()
+    @Transaction()
     @Mutation()
-    @Allow(Permission.CreateCatalog)
+    @Allow(Permission.DeleteCatalog, Permission.DeleteFacet)
+    async deleteFacets(
+        @Ctx() ctx: RequestContext,
+        @Args() args: MutationDeleteFacetsArgs,
+    ): Promise<DeletionResponse[]> {
+        return Promise.all(args.ids.map(id => this.facetService.delete(ctx, id, args.force || false)));
+    }
+
+    @Transaction()
+    @Mutation()
+    @Allow(Permission.CreateCatalog, Permission.CreateFacet)
     async createFacetValues(
         @Ctx() ctx: RequestContext,
         @Args() args: MutationCreateFacetValuesArgs,
@@ -104,17 +133,17 @@ export class FacetResolver {
         if (!facet) {
             throw new EntityNotFoundError('Facet', facetId);
         }
-        return Promise.all(
-            input.map(async facetValue => {
-                const res = await this.facetValueService.create(ctx, facet, facetValue);
-                return res;
-            }),
-        );
+        const facetValues: Array<Translated<FacetValue>> = [];
+        for (const facetValue of input) {
+            const res = await this.facetValueService.create(ctx, facet, facetValue);
+            facetValues.push(res);
+        }
+        return facetValues;
     }
 
     @Transaction()
     @Mutation()
-    @Allow(Permission.UpdateCatalog)
+    @Allow(Permission.UpdateCatalog, Permission.UpdateFacet)
     async updateFacetValues(
         @Ctx() ctx: RequestContext,
         @Args() args: MutationUpdateFacetValuesArgs,
@@ -125,16 +154,35 @@ export class FacetResolver {
 
     @Transaction()
     @Mutation()
-    @Allow(Permission.DeleteCatalog)
+    @Allow(Permission.DeleteCatalog, Permission.DeleteFacet)
     async deleteFacetValues(
         @Ctx() ctx: RequestContext,
         @Args() args: MutationDeleteFacetValuesArgs,
     ): Promise<DeletionResponse[]> {
-        // return Promise.all(args.ids.map(id => this.facetValueService.delete(ctx, id, args.force || false)));
         const results: DeletionResponse[] = [];
         for (const id of args.ids) {
             results.push(await this.facetValueService.delete(ctx, id, args.force || false));
         }
         return results;
+    }
+
+    @Transaction()
+    @Mutation()
+    @Allow(Permission.CreateCatalog, Permission.CreateFacet)
+    async assignFacetsToChannel(
+        @Ctx() ctx: RequestContext,
+        @Args() args: MutationAssignFacetsToChannelArgs,
+    ): Promise<Facet[]> {
+        return await this.facetService.assignFacetsToChannel(ctx, args.input);
+    }
+
+    @Transaction()
+    @Mutation()
+    @Allow(Permission.DeleteCatalog, Permission.DeleteFacet)
+    async removeFacetsFromChannel(
+        @Ctx() ctx: RequestContext,
+        @Args() args: MutationRemoveFacetsFromChannelArgs,
+    ): Promise<Array<ErrorResultUnion<RemoveFacetFromChannelResult, Facet>>> {
+        return await this.facetService.removeFacetsFromChannel(ctx, args.input);
     }
 }

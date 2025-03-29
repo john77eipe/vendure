@@ -2,8 +2,11 @@ import { Args, Mutation, Query, Resolver } from '@nestjs/graphql';
 import {
     CreatePromotionResult,
     DeletionResponse,
+    MutationAssignPromotionsToChannelArgs,
     MutationCreatePromotionArgs,
     MutationDeletePromotionArgs,
+    MutationDeletePromotionsArgs,
+    MutationRemovePromotionsFromChannelArgs,
     MutationUpdatePromotionArgs,
     Permission,
     QueryPromotionArgs,
@@ -20,6 +23,7 @@ import { PromotionService } from '../../../service/services/promotion.service';
 import { ConfigurableOperationCodec } from '../../common/configurable-operation-codec';
 import { RequestContext } from '../../common/request-context';
 import { Allow } from '../../decorators/allow.decorator';
+import { RelationPaths, Relations } from '../../decorators/relations.decorator';
 import { Ctx } from '../../decorators/request-context.decorator';
 import { Transaction } from '../../decorators/transaction.decorator';
 
@@ -35,8 +39,9 @@ export class PromotionResolver {
     promotions(
         @Ctx() ctx: RequestContext,
         @Args() args: QueryPromotionsArgs,
+        @Relations(Promotion) relations: RelationPaths<Promotion>,
     ): Promise<PaginatedList<Promotion>> {
-        return this.promotionService.findAll(ctx, args.options || undefined).then(res => {
+        return this.promotionService.findAll(ctx, args.options || undefined, relations).then(res => {
             res.items.forEach(this.encodeConditionsAndActions);
             return res;
         });
@@ -44,8 +49,12 @@ export class PromotionResolver {
 
     @Query()
     @Allow(Permission.ReadPromotion)
-    promotion(@Ctx() ctx: RequestContext, @Args() args: QueryPromotionArgs): Promise<Promotion | undefined> {
-        return this.promotionService.findOne(ctx, args.id).then(this.encodeConditionsAndActions);
+    promotion(
+        @Ctx() ctx: RequestContext,
+        @Args() args: QueryPromotionArgs,
+        @Relations(Promotion) relations: RelationPaths<Promotion>,
+    ): Promise<Promotion | undefined> {
+        return this.promotionService.findOne(ctx, args.id, relations).then(this.encodeConditionsAndActions);
     }
 
     @Query()
@@ -110,11 +119,41 @@ export class PromotionResolver {
         return this.promotionService.softDeletePromotion(ctx, args.id);
     }
 
+    @Transaction()
+    @Mutation()
+    @Allow(Permission.DeletePromotion)
+    deletePromotions(
+        @Ctx() ctx: RequestContext,
+        @Args() args: MutationDeletePromotionsArgs,
+    ): Promise<DeletionResponse[]> {
+        return Promise.all(args.ids.map(id => this.promotionService.softDeletePromotion(ctx, id)));
+    }
+
+    @Transaction()
+    @Mutation()
+    @Allow(Permission.UpdatePromotion)
+    assignPromotionsToChannel(
+        @Ctx() ctx: RequestContext,
+        @Args() args: MutationAssignPromotionsToChannelArgs,
+    ): Promise<Promotion[]> {
+        return this.promotionService.assignPromotionsToChannel(ctx, args.input);
+    }
+
+    @Transaction()
+    @Mutation()
+    @Allow(Permission.UpdatePromotion)
+    removePromotionsFromChannel(
+        @Ctx() ctx: RequestContext,
+        @Args() args: MutationRemovePromotionsFromChannelArgs,
+    ): Promise<Promotion[]> {
+        return this.promotionService.removePromotionsFromChannel(ctx, args.input);
+    }
+
     /**
      * Encodes any entity IDs used in the filter arguments.
      */
     private encodeConditionsAndActions = <
-        T extends ErrorResultUnion<CreatePromotionResult, Promotion> | undefined
+        T extends ErrorResultUnion<CreatePromotionResult, Promotion> | undefined,
     >(
         maybePromotion: T,
     ): T => {

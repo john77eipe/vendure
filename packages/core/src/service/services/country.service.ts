@@ -5,41 +5,51 @@ import {
     DeletionResult,
     UpdateCountryInput,
 } from '@vendure/common/lib/generated-types';
-import { ID, PaginatedList } from '@vendure/common/lib/shared-types';
+import { ID, PaginatedList, Type } from '@vendure/common/lib/shared-types';
 
 import { RequestContext } from '../../api/common/request-context';
+import { RelationPaths } from '../../api/decorators/relations.decorator';
 import { UserInputError } from '../../common/error/errors';
 import { ListQueryOptions } from '../../common/types/common-types';
 import { Translated } from '../../common/types/locale-types';
 import { assertFound } from '../../common/utils';
+import { TransactionalConnection } from '../../connection/transactional-connection';
 import { Address } from '../../entity';
-import { CountryTranslation } from '../../entity/country/country-translation.entity';
-import { Country } from '../../entity/country/country.entity';
+import { Country } from '../../entity/region/country.entity';
+import { RegionTranslation } from '../../entity/region/region-translation.entity';
+import { Region } from '../../entity/region/region.entity';
+import { EventBus } from '../../event-bus';
+import { CountryEvent } from '../../event-bus/events/country-event';
 import { ListQueryBuilder } from '../helpers/list-query-builder/list-query-builder';
 import { TranslatableSaver } from '../helpers/translatable-saver/translatable-saver';
-import { translateDeep } from '../helpers/utils/translate-entity';
-import { TransactionalConnection } from '../transaction/transactional-connection';
+import { TranslatorService } from '../helpers/translator/translator.service';
 
-import { ZoneService } from './zone.service';
-
+/**
+ * @description
+ * Contains methods relating to {@link Country} entities.
+ *
+ * @docsCategory services
+ */
 @Injectable()
 export class CountryService {
     constructor(
         private connection: TransactionalConnection,
         private listQueryBuilder: ListQueryBuilder,
         private translatableSaver: TranslatableSaver,
-        private zoneService: ZoneService,
+        private eventBus: EventBus,
+        private translator: TranslatorService,
     ) {}
 
     findAll(
         ctx: RequestContext,
         options?: ListQueryOptions<Country>,
+        relations: RelationPaths<Country> = [],
     ): Promise<PaginatedList<Translated<Country>>> {
         return this.listQueryBuilder
-            .build(Country, options, { ctx })
+            .build(Country, options, { ctx, relations })
             .getManyAndCount()
             .then(([countries, totalItems]) => {
-                const items = countries.map(country => translateDeep(country, ctx.languageCode));
+                const items = countries.map(country => this.translator.translate(country, ctx));
                 return {
                     items,
                     totalItems,
@@ -47,13 +57,32 @@ export class CountryService {
             });
     }
 
-    findOne(ctx: RequestContext, countryId: ID): Promise<Translated<Country> | undefined> {
+    findOne(
+        ctx: RequestContext,
+        countryId: ID,
+        relations: RelationPaths<Country> = [],
+    ): Promise<Translated<Country> | undefined> {
         return this.connection
             .getRepository(ctx, Country)
-            .findOne(countryId)
-            .then(country => country && translateDeep(country, ctx.languageCode));
+            .findOne({ where: { id: countryId }, relations })
+            .then(country => (country && this.translator.translate(country, ctx)) ?? undefined);
     }
 
+    /**
+     * @description
+     * Returns an array of enabled Countries, intended for use in a public-facing (ie. Shop) API.
+     */
+    findAllAvailable(ctx: RequestContext): Promise<Array<Translated<Country>>> {
+        return this.connection
+            .getRepository(ctx, Country)
+            .find({ where: { enabled: true } })
+            .then(items => items.map(country => this.translator.translate(country, ctx)));
+    }
+
+    /**
+     * @description
+     * Returns a Country based on its ISO country code.
+     */
     async findOneByCode(ctx: RequestContext, countryCode: string): Promise<Translated<Country>> {
         const country = await this.connection.getRepository(ctx, Country).findOne({
             where: {
@@ -63,7 +92,7 @@ export class CountryService {
         if (!country) {
             throw new UserInputError('error.country-code-not-valid', { countryCode });
         }
-        return translateDeep(country, ctx.languageCode);
+        return this.translator.translate(country, ctx);
     }
 
     async create(ctx: RequestContext, input: CreateCountryInput): Promise<Translated<Country>> {
@@ -71,9 +100,9 @@ export class CountryService {
             ctx,
             input,
             entityType: Country,
-            translationType: CountryTranslation,
+            translationType: RegionTranslation,
         });
-        await this.zoneService.updateZonesCache(ctx);
+        await this.eventBus.publish(new CountryEvent(ctx, country, 'created', input));
         return assertFound(this.findOne(ctx, country.id));
     }
 
@@ -82,9 +111,9 @@ export class CountryService {
             ctx,
             input,
             entityType: Country,
-            translationType: CountryTranslation,
+            translationType: RegionTranslation,
         });
-        await this.zoneService.updateZonesCache(ctx);
+        await this.eventBus.publish(new CountryEvent(ctx, country, 'updated', input));
         return assertFound(this.findOne(ctx, country.id));
     }
 
@@ -102,8 +131,9 @@ export class CountryService {
                 message: ctx.translate('message.country-used-in-addresses', { count: addressesUsingCountry }),
             };
         } else {
-            await this.zoneService.updateZonesCache(ctx);
+            const deletedCountry = new Country(country);
             await this.connection.getRepository(ctx, Country).remove(country);
+            await this.eventBus.publish(new CountryEvent(ctx, deletedCountry, 'deleted', id));
             return {
                 result: DeletionResult.DELETED,
                 message: '',

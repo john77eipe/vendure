@@ -1,7 +1,8 @@
-/* tslint:disable:no-non-null-assertion */
+/* eslint-disable @typescript-eslint/no-non-null-assertion */
 import { createTestEnvironment } from '@vendure/testing';
 import gql from 'graphql-tag';
 import path from 'path';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { initialData } from '../../../e2e-common/e2e-initial-data';
 import { testConfig, TEST_SETUP_TIMEOUT_MS } from '../../../e2e-common/test-config';
@@ -17,9 +18,10 @@ import {
     IdTest8,
     LanguageCode,
 } from './graphql/generated-e2e-admin-types';
+import { sortById } from './utils/test-order-utils';
 
 describe('EntityIdStrategy', () => {
-    const { server, adminClient, shopClient } = createTestEnvironment(testConfig);
+    const { server, adminClient, shopClient } = createTestEnvironment(testConfig());
 
     beforeAll(async () => {
         await server.init({
@@ -44,9 +46,13 @@ describe('EntityIdStrategy', () => {
                 }
             }
         `);
-        expect(products).toEqual({
-            items: [{ id: 'T_1' }, { id: 'T_2' }, { id: 'T_3' }, { id: 'T_4' }, { id: 'T_5' }],
-        });
+        expect(products.items.sort(sortById)).toEqual([
+            { id: 'T_1' },
+            { id: 'T_2' },
+            { id: 'T_3' },
+            { id: 'T_4' },
+            { id: 'T_5' },
+        ]);
     });
 
     it('Does not doubly-encode ids from resolved properties', async () => {

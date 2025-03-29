@@ -1,59 +1,59 @@
 import { RequestContext } from '../../../api/common/request-context';
-import { Transitions } from '../../../common/finite-state-machine/types';
 import { Order } from '../../../entity/order/order.entity';
 
 /**
  * @description
- * These are the default states of the Order process. They can be augmented and
- * modified by using the {@link OrderOptions} `process` property.
+ * An interface to extend standard {@link OrderState}.
  *
  * @docsCategory orders
+ * @deprecated use OrderStates
+ */
+export interface CustomOrderStates {}
+
+/**
+ * @description
+ * An interface to extend the {@link OrderState} type.
+ *
+ * @docsCategory orders
+ * @docsPage OrderProcess
+ * @since 2.0.0
+ */
+export interface OrderStates {}
+
+/**
+ * @description
+ * These are the default states of the Order process. They can be augmented and
+ * modified by using the {@link OrderOptions} `process` property, and by default
+ * the {@link defaultOrderProcess} will add the states
+ *
+ * - `ArrangingPayment`
+ * - `PaymentAuthorized`
+ * - `PaymentSettled`
+ * - `PartiallyShipped`
+ * - `Shipped`
+ * - `PartiallyDelivered`
+ * - `Delivered`
+ * - `Modifying`
+ * - `ArrangingAdditionalPayment`
+ *
+ * @docsCategory orders
+ * @docsPage OrderProcess
  */
 export type OrderState =
     | 'Created'
+    | 'Draft'
     | 'AddingItems'
-    | 'ArrangingPayment'
-    | 'PaymentAuthorized'
-    | 'PaymentSettled'
-    | 'PartiallyShipped'
-    | 'Shipped'
-    | 'PartiallyDelivered'
-    | 'Delivered'
-    | 'Cancelled';
+    | 'Cancelled'
+    | keyof CustomOrderStates
+    | keyof OrderStates;
 
-export const orderStateTransitions: Transitions<OrderState> = {
-    Created: {
-        to: ['AddingItems'],
-    },
-    AddingItems: {
-        to: ['ArrangingPayment', 'Cancelled'],
-    },
-    ArrangingPayment: {
-        to: ['PaymentAuthorized', 'PaymentSettled', 'AddingItems', 'Cancelled'],
-    },
-    PaymentAuthorized: {
-        to: ['PaymentSettled', 'Cancelled'],
-    },
-    PaymentSettled: {
-        to: ['PartiallyDelivered', 'Delivered', 'PartiallyShipped', 'Shipped', 'Cancelled'],
-    },
-    PartiallyShipped: {
-        to: ['Shipped', 'PartiallyDelivered', 'Cancelled'],
-    },
-    Shipped: {
-        to: ['PartiallyDelivered', 'Delivered', 'Cancelled'],
-    },
-    PartiallyDelivered: {
-        to: ['Delivered', 'Cancelled'],
-    },
-    Delivered: {
-        to: ['Cancelled'],
-    },
-    Cancelled: {
-        to: [],
-    },
-};
-
+/**
+ * @description
+ * This is the object passed to the {@link OrderProcess} state transition hooks.
+ *
+ * @docsCategory orders
+ * @docsPage OrderProcess
+ */
 export interface OrderTransitionData {
     ctx: RequestContext;
     order: Order;

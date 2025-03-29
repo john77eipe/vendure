@@ -4,6 +4,7 @@ import {
     MutationCreateTaxRateArgs,
     MutationDeleteTaxRateArgs,
     MutationUpdateTaxRateArgs,
+    MutationDeleteTaxRatesArgs,
     Permission,
     QueryTaxRateArgs,
     QueryTaxRatesArgs,
@@ -14,6 +15,7 @@ import { TaxRate } from '../../../entity/tax-rate/tax-rate.entity';
 import { TaxRateService } from '../../../service/services/tax-rate.service';
 import { RequestContext } from '../../common/request-context';
 import { Allow } from '../../decorators/allow.decorator';
+import { RelationPaths, Relations } from '../../decorators/relations.decorator';
 import { Ctx } from '../../decorators/request-context.decorator';
 import { Transaction } from '../../decorators/transaction.decorator';
 
@@ -22,20 +24,28 @@ export class TaxRateResolver {
     constructor(private taxRateService: TaxRateService) {}
 
     @Query()
-    @Allow(Permission.ReadSettings, Permission.ReadCatalog)
-    taxRates(@Ctx() ctx: RequestContext, @Args() args: QueryTaxRatesArgs): Promise<PaginatedList<TaxRate>> {
-        return this.taxRateService.findAll(ctx, args.options || undefined);
+    @Allow(Permission.ReadSettings, Permission.ReadCatalog, Permission.ReadProduct, Permission.ReadTaxRate)
+    async taxRates(
+        @Ctx() ctx: RequestContext,
+        @Args() args: QueryTaxRatesArgs,
+        @Relations(TaxRate) relations: RelationPaths<TaxRate>,
+    ): Promise<PaginatedList<TaxRate>> {
+        return this.taxRateService.findAll(ctx, args.options || undefined, relations);
     }
 
     @Query()
-    @Allow(Permission.ReadSettings, Permission.ReadCatalog)
-    async taxRate(@Ctx() ctx: RequestContext, @Args() args: QueryTaxRateArgs): Promise<TaxRate | undefined> {
-        return this.taxRateService.findOne(ctx, args.id);
+    @Allow(Permission.ReadSettings, Permission.ReadCatalog, Permission.ReadTaxRate)
+    async taxRate(
+        @Ctx() ctx: RequestContext,
+        @Args() args: QueryTaxRateArgs,
+        @Relations(TaxRate) relations: RelationPaths<TaxRate>,
+    ): Promise<TaxRate | undefined> {
+        return this.taxRateService.findOne(ctx, args.id, relations);
     }
 
     @Transaction()
     @Mutation()
-    @Allow(Permission.CreateSettings)
+    @Allow(Permission.CreateSettings, Permission.CreateTaxRate)
     async createTaxRate(
         @Ctx() ctx: RequestContext,
         @Args() args: MutationCreateTaxRateArgs,
@@ -45,7 +55,7 @@ export class TaxRateResolver {
 
     @Transaction()
     @Mutation()
-    @Allow(Permission.UpdateSettings)
+    @Allow(Permission.UpdateSettings, Permission.UpdateTaxRate)
     async updateTaxRate(
         @Ctx() ctx: RequestContext,
         @Args() args: MutationUpdateTaxRateArgs,
@@ -55,11 +65,21 @@ export class TaxRateResolver {
 
     @Transaction()
     @Mutation()
-    @Allow(Permission.DeleteSettings)
+    @Allow(Permission.DeleteSettings, Permission.DeleteTaxRate)
     async deleteTaxRate(
         @Ctx() ctx: RequestContext,
         @Args() args: MutationDeleteTaxRateArgs,
     ): Promise<DeletionResponse> {
         return this.taxRateService.delete(ctx, args.id);
+    }
+
+    @Transaction()
+    @Mutation()
+    @Allow(Permission.DeleteSettings, Permission.DeleteTaxRate)
+    async deleteTaxRates(
+        @Ctx() ctx: RequestContext,
+        @Args() args: MutationDeleteTaxRatesArgs,
+    ): Promise<DeletionResponse[]> {
+        return Promise.all(args.ids.map(id => this.taxRateService.delete(ctx, id)));
     }
 }

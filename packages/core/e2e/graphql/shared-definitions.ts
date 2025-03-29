@@ -14,6 +14,7 @@ import {
     GLOBAL_SETTINGS_FRAGMENT,
     ORDER_FRAGMENT,
     ORDER_WITH_LINES_FRAGMENT,
+    PAYMENT_FRAGMENT,
     PRODUCT_OPTION_GROUP_FRAGMENT,
     PRODUCT_VARIANT_FRAGMENT,
     PRODUCT_WITH_OPTIONS_FRAGMENT,
@@ -136,6 +137,7 @@ export const GET_CUSTOMER_LIST = gql`
                 phoneNumber
                 user {
                     id
+                    identifier
                     verified
                 }
             }
@@ -207,6 +209,10 @@ export const ATTEMPT_LOGIN = gql`
     mutation AttemptLogin($username: String!, $password: String!, $rememberMe: Boolean) {
         login(username: $username, password: $password, rememberMe: $rememberMe) {
             ...CurrentUser
+            ... on ErrorResult {
+                errorCode
+                message
+            }
         }
     }
     ${CURRENT_USER_FRAGMENT}
@@ -245,6 +251,18 @@ export const GET_FACET_LIST = gql`
         }
     }
     ${FACET_WITH_VALUES_FRAGMENT}
+`;
+
+export const GET_FACET_LIST_SIMPLE = gql`
+    query GetFacetListSimple($options: FacetListOptions) {
+        facets(options: $options) {
+            items {
+                id
+                name
+            }
+            totalItems
+        }
+    }
 `;
 
 export const DELETE_PRODUCT = gql`
@@ -351,11 +369,33 @@ export const REMOVE_PRODUCT_FROM_CHANNEL = gql`
     ${PRODUCT_WITH_VARIANTS_FRAGMENT}
 `;
 
+export const ASSIGN_PRODUCTVARIANT_TO_CHANNEL = gql`
+    mutation AssignProductVariantsToChannel($input: AssignProductVariantsToChannelInput!) {
+        assignProductVariantsToChannel(input: $input) {
+            ...ProductVariant
+        }
+    }
+    ${PRODUCT_VARIANT_FRAGMENT}
+`;
+
+export const REMOVE_PRODUCTVARIANT_FROM_CHANNEL = gql`
+    mutation RemoveProductVariantsFromChannel($input: RemoveProductVariantsFromChannelInput!) {
+        removeProductVariantsFromChannel(input: $input) {
+            ...ProductVariant
+        }
+    }
+    ${PRODUCT_VARIANT_FRAGMENT}
+`;
+
 export const UPDATE_ASSET = gql`
     mutation UpdateAsset($input: UpdateAssetInput!) {
         updateAsset(input: $input) {
             ...Asset
             ... on Asset {
+                tags {
+                    id
+                    value
+                }
                 focalPoint {
                     x
                     y
@@ -367,8 +407,8 @@ export const UPDATE_ASSET = gql`
 `;
 
 export const DELETE_ASSET = gql`
-    mutation DeleteAsset($id: ID!, $force: Boolean) {
-        deleteAsset(id: $id, force: $force) {
+    mutation DeleteAsset($input: DeleteAssetInput!) {
+        deleteAsset(input: $input) {
             result
             message
         }
@@ -443,6 +483,9 @@ export const CREATE_FULFILLMENT = gql`
                 errorCode
                 message
             }
+            ... on CreateFulfillmentError {
+                fulfillmentHandlerError
+            }
         }
     }
     ${FULFILLMENT_FRAGMENT}
@@ -474,6 +517,12 @@ export const GET_ORDER_FULFILLMENTS = gql`
                 state
                 nextStates
                 method
+                summary {
+                    orderLine {
+                        id
+                    }
+                    quantity
+                }
             }
         }
     }
@@ -674,12 +723,10 @@ export const CANCEL_ORDER = gql`
     }
     fragment CanceledOrder on Order {
         id
+        state
         lines {
+            id
             quantity
-            items {
-                id
-                cancelled
-            }
         }
     }
 `;
@@ -716,6 +763,7 @@ export const GET_PRODUCTS_WITH_VARIANT_PRICES = gql`
                     id
                     price
                     priceWithTax
+                    currencyCode
                     sku
                     facetValues {
                         id
@@ -767,9 +815,260 @@ export const SETTLE_PAYMENT = gql`
             }
         }
     }
-    fragment Payment on Payment {
-        id
-        state
-        metadata
+    ${PAYMENT_FRAGMENT}
+`;
+
+export const GET_ORDER_HISTORY = gql`
+    query GetOrderHistory($id: ID!, $options: HistoryEntryListOptions) {
+        order(id: $id) {
+            id
+            history(options: $options) {
+                totalItems
+                items {
+                    id
+                    type
+                    administrator {
+                        id
+                    }
+                    data
+                }
+            }
+        }
     }
+`;
+
+export const UPDATE_SHIPPING_METHOD = gql`
+    mutation UpdateShippingMethod($input: UpdateShippingMethodInput!) {
+        updateShippingMethod(input: $input) {
+            ...ShippingMethod
+        }
+    }
+    ${SHIPPING_METHOD_FRAGMENT}
+`;
+
+export const GET_ASSET = gql`
+    query GetAsset($id: ID!) {
+        asset(id: $id) {
+            ...Asset
+            width
+            height
+        }
+    }
+    ${ASSET_FRAGMENT}
+`;
+
+export const GET_ASSET_FRAGMENT_FIRST = gql`
+    fragment AssetFragFirst on Asset {
+        id
+        preview
+    }
+
+    query GetAssetFragmentFirst($id: ID!) {
+        asset(id: $id) {
+            ...AssetFragFirst
+        }
+    }
+`;
+
+export const ASSET_WITH_TAGS_AND_FOCAL_POINT_FRAGMENT = gql`
+    fragment AssetWithTagsAndFocalPoint on Asset {
+        ...Asset
+        focalPoint {
+            x
+            y
+        }
+        tags {
+            id
+            value
+        }
+    }
+    ${ASSET_FRAGMENT}
+`;
+
+export const CREATE_ASSETS = gql`
+    mutation CreateAssets($input: [CreateAssetInput!]!) {
+        createAssets(input: $input) {
+            ...AssetWithTagsAndFocalPoint
+            ... on MimeTypeError {
+                message
+                fileName
+                mimeType
+            }
+        }
+    }
+    ${ASSET_WITH_TAGS_AND_FOCAL_POINT_FRAGMENT}
+`;
+
+export const DELETE_SHIPPING_METHOD = gql`
+    mutation DeleteShippingMethod($id: ID!) {
+        deleteShippingMethod(id: $id) {
+            result
+            message
+        }
+    }
+`;
+
+export const ASSIGN_PROMOTIONS_TO_CHANNEL = gql`
+    mutation AssignPromotionToChannel($input: AssignPromotionsToChannelInput!) {
+        assignPromotionsToChannel(input: $input) {
+            id
+            name
+        }
+    }
+`;
+
+export const REMOVE_PROMOTIONS_FROM_CHANNEL = gql`
+    mutation RemovePromotionFromChannel($input: RemovePromotionsFromChannelInput!) {
+        removePromotionsFromChannel(input: $input) {
+            id
+            name
+        }
+    }
+`;
+
+export const GET_TAX_RATES_LIST = gql`
+    query GetTaxRates($options: TaxRateListOptions) {
+        taxRates(options: $options) {
+            items {
+                ...TaxRate
+            }
+            totalItems
+        }
+    }
+    ${TAX_RATE_FRAGMENT}
+`;
+export const GET_SHIPPING_METHOD_LIST = gql`
+    query GetShippingMethodList {
+        shippingMethods {
+            items {
+                ...ShippingMethod
+            }
+            totalItems
+        }
+    }
+    ${SHIPPING_METHOD_FRAGMENT}
+`;
+
+export const GET_COLLECTIONS = gql`
+    query GetCollections {
+        collections {
+            items {
+                id
+                name
+                position
+                parent {
+                    id
+                    name
+                }
+            }
+        }
+    }
+`;
+
+export const TRANSITION_PAYMENT_TO_STATE = gql`
+    mutation TransitionPaymentToState($id: ID!, $state: String!) {
+        transitionPaymentToState(id: $id, state: $state) {
+            ...Payment
+            ... on ErrorResult {
+                errorCode
+                message
+            }
+            ... on PaymentStateTransitionError {
+                transitionError
+            }
+        }
+    }
+    ${PAYMENT_FRAGMENT}
+`;
+
+export const GET_PRODUCT_VARIANT_LIST = gql`
+    query GetProductVariantList($options: ProductVariantListOptions, $productId: ID) {
+        productVariants(options: $options, productId: $productId) {
+            items {
+                id
+                name
+                sku
+                price
+                priceWithTax
+                currencyCode
+                prices {
+                    currencyCode
+                    price
+                }
+            }
+            totalItems
+        }
+    }
+`;
+
+export const DELETE_PROMOTION = gql`
+    mutation DeletePromotion($id: ID!) {
+        deletePromotion(id: $id) {
+            result
+        }
+    }
+`;
+
+export const GET_CHANNELS = gql`
+    query GetChannels {
+        channels {
+            items {
+                id
+                code
+                token
+            }
+        }
+    }
+`;
+
+export const UPDATE_ADMINISTRATOR = gql`
+    mutation UpdateAdministrator($input: UpdateAdministratorInput!) {
+        updateAdministrator(input: $input) {
+            ...Administrator
+        }
+    }
+    ${ADMINISTRATOR_FRAGMENT}
+`;
+
+export const ASSIGN_COLLECTIONS_TO_CHANNEL = gql`
+    mutation AssignCollectionsToChannel($input: AssignCollectionsToChannelInput!) {
+        assignCollectionsToChannel(input: $input) {
+            ...Collection
+        }
+    }
+    ${COLLECTION_FRAGMENT}
+`;
+
+export const GET_COLLECTION = gql`
+    query GetCollection($id: ID, $slug: String, $variantListOptions: ProductVariantListOptions) {
+        collection(id: $id, slug: $slug) {
+            ...Collection
+            productVariants(options: $variantListOptions) {
+                items {
+                    id
+                    name
+                    price
+                }
+            }
+        }
+    }
+    ${COLLECTION_FRAGMENT}
+`;
+
+export const GET_FACET_WITH_VALUES = gql`
+    query GetFacetWithValues($id: ID!) {
+        facet(id: $id) {
+            ...FacetWithValues
+        }
+    }
+    ${FACET_WITH_VALUES_FRAGMENT}
+`;
+
+export const GET_PROMOTION = gql`
+    query GetPromotion($id: ID!) {
+        promotion(id: $id) {
+            ...Promotion
+        }
+    }
+    ${PROMOTION_FRAGMENT}
 `;

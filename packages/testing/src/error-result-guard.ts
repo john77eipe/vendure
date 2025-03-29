@@ -1,6 +1,7 @@
-declare function fail(error?: any): never;
+import { fail } from 'assert';
 
 /**
+ * @description
  * Convenience method for creating an {@link ErrorResultGuard}. Takes a predicate function which
  * tests whether the input is considered successful (true) or an error result (false).
  *
@@ -8,9 +9,9 @@ declare function fail(error?: any): never;
  * type inference to work as expected:
  *
  * @example
- * ```TypeScript
+ * ```ts
  * const orderResultGuard: ErrorResultGuard<AddItemToOrderResult>
- *   = createErrorResultGuard<AddItemToOrderResult>(order => !!order.lines);
+ *   = createErrorResultGuard(order => !!order.lines);
  * ```
  * @docsCategory testing
  */
@@ -27,9 +28,9 @@ export function createErrorResultGuard<T>(testFn: (input: T) => boolean): ErrorR
  * 2. narrow the type so that TypeScript can correctly infer the properties of the result.
  *
  * @example
- * ```TypeScript
+ * ```ts
  * const orderResultGuard: ErrorResultGuard<AddItemToOrderResult>
- *   = createErrorResultGuard<AddItemToOrderResult>(order => !!order.lines);
+ *   = createErrorResultGuard(order => !!order.lines);
  *
  * it('errors when quantity is negative', async () => {
  *    const { addItemToOrder } = await shopClient.query<AddItemToOrder.Query, AddItemToOrder.Mutation>(ADD_ITEM_TO_ORDER, {
@@ -75,7 +76,7 @@ export class ErrorResultGuard<T> {
      */
     assertErrorResult<R>(input: T | R): asserts input is R {
         if (this.isSuccess(input)) {
-            fail(`Should have errored`);
+            fail('Should have errored');
         }
     }
 }

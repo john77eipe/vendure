@@ -1,11 +1,10 @@
-@import "variables";
 
 .preview {
     display: flex;
     align-items: center;
     justify-content: center;
     max-width: 150px;
-    margin-left: 12px;
+    height: 150px;
     img {
         max-width: 100%;
         display: none;
@@ -14,6 +13,6 @@
         }
     }
     .placeholder {
-        color: $color-grey-300;
+        color: var(--color-grey-300);
     }
 }

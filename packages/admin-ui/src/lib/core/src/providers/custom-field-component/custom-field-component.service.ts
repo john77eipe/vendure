@@ -1,5 +1,4 @@
-import { ComponentFactoryResolver, Injectable } from '@angular/core';
-import { Type } from '@vendure/common/lib/shared-types';
+import { Injectable } from '@angular/core';
 
 import { FormInputComponent } from '../../common/component-registry-types';
 import { CustomFields, CustomFieldsFragment } from '../../common/generated-types';
@@ -13,27 +12,14 @@ export type CustomFieldEntityName = Exclude<keyof CustomFields, '__typename'>;
 
 /**
  * This service allows the registration of custom controls for customFields.
+ *
+ * @deprecated The ComponentRegistryService now handles custom field components directly.
  */
 @Injectable({
     providedIn: 'root',
 })
 export class CustomFieldComponentService {
-    constructor(
-        private componentFactoryResolver: ComponentFactoryResolver,
-        private componentRegistryService: ComponentRegistryService,
-    ) {}
-
-    /**
-     * Register a CustomFieldControl component to be used with the specified customField and entity.
-     */
-    registerCustomFieldComponent(
-        entity: CustomFieldEntityName,
-        fieldName: string,
-        component: Type<CustomFieldControl>,
-    ) {
-        const id = this.generateId(entity, fieldName, true);
-        this.componentRegistryService.registerInputComponent(id, component);
-    }
+    constructor(private componentRegistryService: ComponentRegistryService) {}
 
     /**
      * Checks whether a custom component is registered for the given entity custom field,

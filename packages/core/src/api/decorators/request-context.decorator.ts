@@ -1,6 +1,8 @@
-import { ContextType, createParamDecorator, ExecutionContext } from '@nestjs/common';
+import { createParamDecorator, ExecutionContext } from '@nestjs/common';
 
-import { REQUEST_CONTEXT_KEY } from '../../common/constants';
+import { isFieldResolver } from '../common/is-field-resolver';
+import { parseContext } from '../common/parse-context';
+import { internal_getRequestContext } from '../common/request-context';
 
 /**
  * @description
@@ -8,7 +10,7 @@ import { REQUEST_CONTEXT_KEY } from '../../common/constants';
  * request object.
  *
  * @example
- * ```TypeScript
+ * ```ts
  *  \@Query()
  *  getAdministrators(\@Ctx() ctx: RequestContext) {
  *      // ...
@@ -18,12 +20,8 @@ import { REQUEST_CONTEXT_KEY } from '../../common/constants';
  * @docsCategory request
  * @docsPage Ctx Decorator
  */
-export const Ctx = createParamDecorator((data, ctx: ExecutionContext) => {
-    if (ctx.getType<ContextType | 'graphql'>() === 'graphql') {
-        // GraphQL request
-        return ctx.getArgByIndex(2).req[REQUEST_CONTEXT_KEY];
-    } else {
-        // REST request
-        return ctx.switchToHttp().getRequest()[REQUEST_CONTEXT_KEY];
-    }
+export const Ctx = createParamDecorator((data, executionContext: ExecutionContext) => {
+    const context = parseContext(executionContext);
+    const handlerIsFieldResolver = context.isGraphQL && isFieldResolver(context.info);
+    return internal_getRequestContext(context.req, handlerIsFieldResolver ? undefined : executionContext);
 });

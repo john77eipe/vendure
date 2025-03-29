@@ -1,8 +1,10 @@
 import { ConfigurableOperation } from '@vendure/common/lib/generated-types';
+import { omit } from '@vendure/common/lib/omit';
 import { DeepPartial } from '@vendure/common/lib/shared-types';
 import { Column, Entity, JoinTable, ManyToMany, OneToMany } from 'typeorm';
 
 import { RequestContext } from '../../api/common/request-context';
+import { roundMoney } from '../../common/round-money';
 import { ChannelAware, SoftDeletable } from '../../common/types/common-types';
 import { LocaleString, Translatable, Translation } from '../../common/types/locale-types';
 import { getConfig } from '../../config/config-helpers';
@@ -32,7 +34,8 @@ import { ShippingMethodTranslation } from './shipping-method-translation.entity'
 @Entity()
 export class ShippingMethod
     extends VendureEntity
-    implements ChannelAware, SoftDeletable, HasCustomFields, Translatable {
+    implements ChannelAware, SoftDeletable, HasCustomFields, Translatable
+{
     private readonly allCheckers: { [code: string]: ShippingEligibilityChecker } = {};
     private readonly allCalculators: { [code: string]: ShippingCalculator } = {};
 
@@ -57,7 +60,10 @@ export class ShippingMethod
 
     @Column('simple-json') calculator: ConfigurableOperation;
 
-    @ManyToMany(type => Channel)
+    @Column()
+    fulfillmentHandlerCode: string;
+
+    @ManyToMany(type => Channel, channel => channel.shippingMethods)
     @JoinTable()
     channels: Channel[];
 
@@ -70,12 +76,13 @@ export class ShippingMethod
     async apply(ctx: RequestContext, order: Order): Promise<ShippingCalculationResult | undefined> {
         const calculator = this.allCalculators[this.calculator.code];
         if (calculator) {
-            const response = await calculator.calculate(ctx, order, this.calculator.args);
+            const response = await calculator.calculate(ctx, order, this.calculator.args, this);
             if (response) {
-                const { price, priceWithTax, metadata } = response;
+                const { price, priceIncludesTax, taxRate, metadata } = response;
                 return {
-                    price: Math.round(price),
-                    priceWithTax: Math.round(priceWithTax),
+                    price: roundMoney(price),
+                    priceIncludesTax,
+                    taxRate,
                     metadata,
                 };
             }
@@ -85,9 +92,17 @@ export class ShippingMethod
     async test(ctx: RequestContext, order: Order): Promise<boolean> {
         const checker = this.allCheckers[this.checker.code];
         if (checker) {
-            return checker.check(ctx, order, this.checker.args);
+            return checker.check(ctx, order, this.checker.args, this);
         } else {
             return false;
         }
+    }
+
+    /**
+     * This is a fix for https://github.com/vendure-ecommerce/vendure/issues/3277,
+     * to prevent circular references which cause the JSON.stringify() to fail.
+     */
+    protected toJSON(): any {
+        return omit(this, ['allCheckers', 'allCalculators'] as any);
     }
 }

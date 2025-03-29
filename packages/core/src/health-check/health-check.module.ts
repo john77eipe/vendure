@@ -1,33 +1,29 @@
 import { Module } from '@nestjs/common';
-import { MicroserviceHealthIndicator, TerminusModule, TypeOrmHealthIndicator } from '@nestjs/terminus';
+import { TerminusModule } from '@nestjs/terminus';
 
 import { ConfigModule } from '../config/config.module';
 import { ConfigService } from '../config/config.service';
+import { isInspectableJobQueueStrategy } from '../config/job-queue/inspectable-job-queue-strategy';
+import { JobQueueModule } from '../job-queue/job-queue.module';
 
 import { HealthCheckRegistryService } from './health-check-registry.service';
 import { HealthController } from './health-check.controller';
+import { CustomHttpHealthIndicator } from './http-health-check-strategy';
 
 @Module({
-    imports: [TerminusModule, ConfigModule],
+    imports: [TerminusModule, ConfigModule, JobQueueModule],
     controllers: [HealthController],
-    providers: [HealthCheckRegistryService],
+    providers: [HealthCheckRegistryService, CustomHttpHealthIndicator],
     exports: [HealthCheckRegistryService],
 })
 export class HealthCheckModule {
     constructor(
         private configService: ConfigService,
         private healthCheckRegistryService: HealthCheckRegistryService,
-        private typeOrm: TypeOrmHealthIndicator,
-        private microservice: MicroserviceHealthIndicator,
     ) {
-        // Register the default health checks for database and worker
-        this.healthCheckRegistryService.registerIndicatorFunction([
-            () => this.typeOrm.pingCheck('database'),
-            () =>
-                this.microservice.pingCheck('worker', {
-                    transport: this.configService.workerOptions.transport,
-                    options: this.configService.workerOptions.options,
-                }),
-        ]);
+        // Register all configured health checks
+        for (const strategy of this.configService.systemOptions.healthChecks) {
+            this.healthCheckRegistryService.registerIndicatorFunction(strategy.getHealthIndicator());
+        }
     }
 }
